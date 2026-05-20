@@ -11,14 +11,14 @@ import org.jeecg.modules.openclaw.entity.OpenclawAgentRun;
 import org.jeecg.modules.openclaw.entity.OpenclawSkill;
 import org.jeecg.modules.openclaw.entity.OpenclawUserQuota;
 import org.jeecg.modules.openclaw.entity.OpenclawWorkspace;
+import org.jeecg.modules.openclaw.mapper.OpenclawAgentMapper;
+import org.jeecg.modules.openclaw.mapper.OpenclawAgentRunMapper;
+import org.jeecg.modules.openclaw.mapper.OpenclawSkillMapper;
 import org.jeecg.modules.openclaw.mapper.OpenclawUserQuotaMapper;
-import org.jeecg.modules.openclaw.service.IOpenclawAgentRunService;
-import org.jeecg.modules.openclaw.service.IOpenclawAgentService;
+import org.jeecg.modules.openclaw.mapper.OpenclawWorkspaceMapper;
 import org.jeecg.modules.openclaw.service.IOpenclawAuditLogService;
 import org.jeecg.modules.openclaw.service.IOpenclawPermissionService;
-import org.jeecg.modules.openclaw.service.IOpenclawSkillService;
 import org.jeecg.modules.openclaw.service.IOpenclawUserQuotaService;
-import org.jeecg.modules.openclaw.service.IOpenclawWorkspaceService;
 import org.jeecg.modules.openclaw.vo.OpenclawQuotaUsageVO;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -35,13 +35,13 @@ public class OpenclawUserQuotaServiceImpl extends ServiceImpl<OpenclawUserQuotaM
     @Autowired
     private IOpenclawPermissionService permissionService;
     @Autowired
-    private IOpenclawAgentService agentService;
+    private OpenclawAgentMapper agentMapper;
     @Autowired
-    private IOpenclawWorkspaceService workspaceService;
+    private OpenclawWorkspaceMapper workspaceMapper;
     @Autowired
-    private IOpenclawSkillService skillService;
+    private OpenclawSkillMapper skillMapper;
     @Autowired
-    private IOpenclawAgentRunService runService;
+    private OpenclawAgentRunMapper runMapper;
     @Autowired
     private IOpenclawAuditLogService auditLogService;
 
@@ -127,11 +127,11 @@ public class OpenclawUserQuotaServiceImpl extends ServiceImpl<OpenclawUserQuotaM
         LoginUser user = permissionService.currentUser();
         OpenclawQuotaUsageVO vo = new OpenclawQuotaUsageVO();
         vo.setQuota(getOrCreateQuota(user));
-        vo.setUsedAgents(Math.toIntExact(agentService.count(ownerAgentWrapper(user.getId()))));
-        vo.setUsedWorkspaces(Math.toIntExact(workspaceService.count(ownerWorkspaceWrapper(user.getId()))));
-        vo.setUsedSkills(Math.toIntExact(skillService.count(ownerSkillWrapper(user.getId()))));
-        vo.setTodayRuns(Math.toIntExact(runService.count(todayRunWrapper(user.getId()))));
-        vo.setRunningRuns(Math.toIntExact(runService.count(runningRunWrapper(user.getId()))));
+        vo.setUsedAgents(Math.toIntExact(agentMapper.selectCount(ownerAgentWrapper(user.getId()))));
+        vo.setUsedWorkspaces(Math.toIntExact(workspaceMapper.selectCount(ownerWorkspaceWrapper(user.getId()))));
+        vo.setUsedSkills(Math.toIntExact(skillMapper.selectCount(ownerSkillWrapper(user.getId()))));
+        vo.setTodayRuns(Math.toIntExact(runMapper.selectCount(todayRunWrapper(user.getId()))));
+        vo.setRunningRuns(Math.toIntExact(runMapper.selectCount(runningRunWrapper(user.getId()))));
         return vo;
     }
 

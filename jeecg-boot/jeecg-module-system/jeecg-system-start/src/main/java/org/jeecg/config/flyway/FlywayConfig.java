@@ -109,7 +109,7 @@ public class FlywayConfig {
         dataSources.forEach((k, v) -> {
             if("master".equals(k)){
                 String databaseType = environment.getProperty("spring.datasource.dynamic.datasource." + k + ".url");
-                if (databaseType != null && databaseType.contains("mysql")) {
+                if (databaseType != null && (databaseType.contains("mysql") || databaseType.contains("postgresql"))) {
                     try {
                         Flyway flyway = Flyway.configure()
                                 .dataSource(v)

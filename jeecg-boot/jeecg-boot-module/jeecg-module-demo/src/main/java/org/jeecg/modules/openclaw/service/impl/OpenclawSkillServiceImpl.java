@@ -3,6 +3,9 @@ package org.jeecg.modules.openclaw.service.impl;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.baomidou.mybatisplus.core.toolkit.IdWorker;
 import jakarta.servlet.http.HttpServletResponse;
+import org.apache.commons.compress.archivers.ArchiveEntry;
+import org.apache.commons.compress.archivers.zip.ZipArchiveEntry;
+import org.apache.commons.compress.archivers.zip.ZipArchiveInputStream;
 import org.jeecg.common.exception.JeecgBootException;
 import org.jeecg.common.system.vo.LoginUser;
 import org.jeecg.modules.openclaw.constant.OpenclawConstants;
@@ -24,20 +27,23 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.security.DigestInputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Comparator;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.UUID;
 import java.util.zip.ZipEntry;
-import java.util.zip.ZipInputStream;
 import java.util.zip.ZipOutputStream;
 
 @Service
@@ -56,6 +62,8 @@ public class OpenclawSkillServiceImpl extends ServiceImpl<OpenclawSkillMapper, O
     public OpenclawSkillImportResultVO importSkill(MultipartFile file) {
         LoginUser user = permissionService.currentUser();
         Path tempDir = null;
+        Path movedTargetDir = null;
+        boolean success = false;
         try {
             validateUpload(file);
             OpenclawUserQuota quota = quotaService.getOrCreateQuota(user);
@@ -80,7 +88,6 @@ public class OpenclawSkillServiceImpl extends ServiceImpl<OpenclawSkillMapper, O
                 .eq(OpenclawSkill::getOwnerUserId, user.getId())
                 .eq(OpenclawSkill::getSlug, slug)
                 .eq(OpenclawSkill::getVersion, version)
-                .eq(OpenclawSkill::getDelFlag, OpenclawConstants.DEL_FLAG_NORMAL)
                 .count() > 0;
             if (exists) {
                 throw new JeecgBootException("相同版本 Skill 已存在，禁止重复导入");
@@ -90,6 +97,7 @@ public class OpenclawSkillServiceImpl extends ServiceImpl<OpenclawSkillMapper, O
                 throw new JeecgBootException("Skill 目标目录已存在，禁止覆盖");
             }
             Files.createDirectories(targetDir.getParent());
+            movedTargetDir = targetDir;
             moveDirectory(tempDir, targetDir);
             tempDir = null;
 
@@ -116,11 +124,15 @@ public class OpenclawSkillServiceImpl extends ServiceImpl<OpenclawSkillMapper, O
             result.setVersion(skill.getVersion());
             result.setChecksum(skill.getChecksum());
             result.setFileSize(skill.getFileSize());
+            success = true;
             return result;
         } catch (IOException e) {
             throw new JeecgBootException("Skill 导入失败: " + e.getMessage(), e);
         } finally {
             cleanupQuietly(tempDir);
+            if (!success) {
+                cleanupQuietly(movedTargetDir);
+            }
         }
     }
 
@@ -193,24 +205,30 @@ public class OpenclawSkillServiceImpl extends ServiceImpl<OpenclawSkillMapper, O
     }
 
     private void unzipSafely(MultipartFile file, Path targetDir) throws IOException {
-        int fileCount = 0;
+        int entryCount = 0;
         long totalSize = 0L;
-        try (ZipInputStream zis = new ZipInputStream(new BufferedInputStream(file.getInputStream()), StandardCharsets.UTF_8)) {
-            ZipEntry entry;
-            while ((entry = zis.getNextEntry()) != null) {
-                String entryName = entry.getName();
-                validateEntryName(entryName);
-                if (entry.isDirectory()) {
-                    Files.createDirectories(targetDir.resolve(entryName).normalize());
-                    continue;
+        Set<Path> extractedPaths = new HashSet<>();
+        try (ZipArchiveInputStream zis = new ZipArchiveInputStream(new BufferedInputStream(file.getInputStream()), StandardCharsets.UTF_8.name(), true, true)) {
+            ArchiveEntry archiveEntry;
+            while ((archiveEntry = zis.getNextEntry()) != null) {
+                if (!(archiveEntry instanceof ZipArchiveEntry entry)) {
+                    throw new JeecgBootException("Skill zip 包含不支持的压缩条目");
                 }
-                fileCount++;
-                if (fileCount > OpenclawConstants.MAX_SKILL_ZIP_FILE_COUNT) {
+                entryCount++;
+                if (entryCount > OpenclawConstants.MAX_SKILL_ZIP_FILE_COUNT) {
                     throw new JeecgBootException("Skill zip 文件数量超过限制");
                 }
-                Path out = targetDir.resolve(entryName).normalize();
-                if (!out.startsWith(targetDir)) {
-                    throw new JeecgBootException("Skill zip 存在路径穿越风险");
+                String entryName = entry.getName();
+                Path out = resolveZipEntryPath(targetDir, entryName);
+                if (!extractedPaths.add(out)) {
+                    throw new JeecgBootException("Skill zip 包含重复路径: " + entryName);
+                }
+                if (entry.isUnixSymlink()) {
+                    throw new JeecgBootException("Skill zip 禁止包含符号链接");
+                }
+                if (entry.isDirectory()) {
+                    Files.createDirectories(out);
+                    continue;
                 }
                 Files.createDirectories(out.getParent());
                 long written = copyEntryWithLimit(zis, out, totalSize);
@@ -218,14 +236,11 @@ public class OpenclawSkillServiceImpl extends ServiceImpl<OpenclawSkillMapper, O
                 if (totalSize > OpenclawConstants.MAX_SKILL_UNZIP_SIZE_BYTES) {
                     throw new JeecgBootException("Skill zip 解压后总大小超过限制");
                 }
-                if (Files.isSymbolicLink(out)) {
-                    throw new JeecgBootException("Skill zip 禁止包含符号链接");
-                }
             }
         }
     }
 
-    private void validateEntryName(String entryName) {
+    private Path resolveZipEntryPath(Path targetDir, String entryName) {
         if (!StringUtils.hasText(entryName) || entryName.contains("\0")) {
             throw new JeecgBootException("Skill zip 包含非法文件名");
         }
@@ -233,8 +248,10 @@ public class OpenclawSkillServiceImpl extends ServiceImpl<OpenclawSkillMapper, O
         if (normalizedName.startsWith("/") || normalizedName.startsWith("\\") || normalizedName.matches("^[A-Za-z]:.*")) {
             throw new JeecgBootException("Skill zip 禁止绝对路径");
         }
-        if (normalizedName.contains("../") || normalizedName.equals("..") || normalizedName.startsWith("../")) {
-            throw new JeecgBootException("Skill zip 存在路径穿越风险");
+        for (String segment : normalizedName.split("/")) {
+            if ("..".equals(segment)) {
+                throw new JeecgBootException("Skill zip 存在路径穿越风险");
+            }
         }
         String lower = normalizedName.toLowerCase(Locale.ROOT);
         for (String ext : OpenclawConstants.BLOCKED_SKILL_EXTENSIONS) {
@@ -242,18 +259,25 @@ public class OpenclawSkillServiceImpl extends ServiceImpl<OpenclawSkillMapper, O
                 throw new JeecgBootException("Skill zip 包含高风险文件类型: " + ext);
             }
         }
+        Path out = targetDir.resolve(normalizedName).normalize();
+        if (!out.startsWith(targetDir)) {
+            throw new JeecgBootException("Skill zip 存在路径穿越风险");
+        }
+        return out;
     }
 
     private long copyEntryWithLimit(InputStream input, Path out, long currentTotal) throws IOException {
         long written = 0L;
         byte[] buffer = new byte[8192];
         int len;
-        while ((len = input.read(buffer)) != -1) {
-            written += len;
-            if (currentTotal + written > OpenclawConstants.MAX_SKILL_UNZIP_SIZE_BYTES) {
-                throw new JeecgBootException("Skill zip 解压后总大小超过限制");
+        try (OutputStream output = Files.newOutputStream(out, StandardOpenOption.CREATE_NEW)) {
+            while ((len = input.read(buffer)) != -1) {
+                written += len;
+                if (currentTotal + written > OpenclawConstants.MAX_SKILL_UNZIP_SIZE_BYTES) {
+                    throw new JeecgBootException("Skill zip 解压后总大小超过限制");
+                }
+                output.write(buffer, 0, len);
             }
-            Files.write(out, java.util.Arrays.copyOf(buffer, len), Files.exists(out) ? java.nio.file.StandardOpenOption.APPEND : java.nio.file.StandardOpenOption.CREATE);
         }
         return written;
     }
@@ -372,11 +396,27 @@ public class OpenclawSkillServiceImpl extends ServiceImpl<OpenclawSkillMapper, O
     }
 
     private void moveDirectory(Path source, Path target) throws IOException {
-        try {
-            Files.move(source, target, StandardCopyOption.ATOMIC_MOVE);
-        } catch (IOException atomicMoveError) {
-            Files.move(source, target);
+        Files.createDirectories(target);
+        List<Path> items;
+        try (var walk = Files.walk(source)) {
+            items = walk.sorted(Comparator.comparingInt(path -> path.getNameCount())).toList();
         }
+        for (Path item : items) {
+            if (source.equals(item)) {
+                continue;
+            }
+            Path destination = target.resolve(source.relativize(item)).normalize();
+            if (!destination.startsWith(target)) {
+                throw new IOException("Invalid Skill path: " + destination);
+            }
+            if (Files.isDirectory(item)) {
+                Files.createDirectories(destination);
+            } else {
+                Files.createDirectories(destination.getParent());
+                Files.copy(item, destination);
+            }
+        }
+        cleanupQuietly(source);
     }
 
     private static class SkillMeta {

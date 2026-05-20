@@ -1,12 +1,18 @@
 <template>
-  <BasicTable @register="registerTable" />
+  <BasicTable @register="registerTable" :searchInfo="searchInfo" />
 </template>
 
 <script lang="ts" setup name="OpenclawAgentRunList">
+  import { reactive } from 'vue';
+  import { useRoute } from 'vue-router';
   import { BasicTable, useTable } from '/@/components/Table';
   import { listRuns } from '../api';
   import { keywordSearch } from '../common';
 
+  const route = useRoute();
+  const searchInfo = reactive<any>({
+    agentId: route.query.agentId,
+  });
   const [registerTable] = useTable({
     title: 'Agent 运行记录',
     api: listRuns,

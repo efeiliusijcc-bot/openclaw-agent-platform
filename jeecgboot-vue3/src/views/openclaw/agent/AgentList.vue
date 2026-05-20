@@ -18,20 +18,55 @@
         <a-form-item label="备注"><a-textarea v-model:value="form.remark" :rows="2" /></a-form-item>
       </a-form>
     </a-modal>
+    <a-modal v-model:open="bindVisible" title="绑定 Skill" :footer="null" width="720px" destroyOnClose>
+      <a-space style="width: 100%; margin-bottom: 12px">
+        <a-select
+          v-model:value="bindSkillId"
+          show-search
+          allow-clear
+          optionFilterProp="label"
+          :options="skillOptions"
+          placeholder="选择 Skill"
+          style="width: 420px"
+        />
+        <a-button type="primary" v-auth="'openclaw:agent:bindSkill'" @click="submitBind">绑定</a-button>
+      </a-space>
+      <a-table size="small" rowKey="id" :columns="bindingColumns" :dataSource="bindingRows" :pagination="false">
+        <template #bodyCell="{ column, record }">
+          <template v-if="column.key === 'action'">
+            <a-button type="link" danger v-auth="'openclaw:agent:unbindSkill'" @click="removeBinding(record)">解绑</a-button>
+          </template>
+        </template>
+      </a-table>
+    </a-modal>
   </div>
 </template>
 
 <script lang="ts" setup name="OpenclawAgentList">
   import { reactive, ref } from 'vue';
   import { Modal } from 'ant-design-vue';
+  import { useRouter } from 'vue-router';
   import { BasicTable, TableAction, useTable } from '/@/components/Table';
   import { useMessage } from '/@/hooks/web/useMessage';
-  import { addAgent, deleteAgent, disableAgent, editAgent, listAgents } from '../api';
+  import { addAgent, bindSkill, deleteAgent, disableAgent, editAgent, listAgentSkills, listAgents, listSkills, unbindSkill } from '../api';
   import { commonTimeColumns, keywordSearch } from '../common';
 
   const { createMessage } = useMessage();
+  const router = useRouter();
   const visible = ref(false);
+  const bindVisible = ref(false);
+  const currentAgent = ref<any>();
+  const bindSkillId = ref<string>();
+  const skillOptions = ref<any[]>([]);
+  const bindingRows = ref<any[]>([]);
   const form = reactive<any>({});
+  const bindingColumns = [
+    { title: 'Skill', dataIndex: 'skillName' },
+    { title: 'Skill ID', dataIndex: 'skillId', width: 220 },
+    { title: '状态', dataIndex: 'enabled', width: 90 },
+    { title: '创建时间', dataIndex: 'createTime', width: 170 },
+    { title: '操作', key: 'action', width: 90 },
+  ];
   const [registerTable, { reload }] = useTable({
     title: '我的 Agent',
     api: listAgents,
@@ -77,6 +112,8 @@
   function actions(record) {
     return [
       { label: '编辑', auth: 'openclaw:agent:edit', onClick: () => openEdit(record) },
+      { label: '绑定 Skill', auth: 'openclaw:agent:bindSkill', onClick: () => openBind(record) },
+      { label: '运行记录', auth: 'openclaw:run:list', onClick: () => router.push({ path: '/openclaw/run', query: { agentId: record.id } }) },
       {
         label: '删除',
         color: 'error',
@@ -89,5 +126,43 @@
         onClick: () => Modal.confirm({ title: '确认禁用该 Agent？', onOk: async () => (await disableAgent({ id: record.id }), reload()) }),
       },
     ];
+  }
+  async function openBind(record) {
+    currentAgent.value = record;
+    bindSkillId.value = undefined;
+    bindVisible.value = true;
+    await loadSkillOptions();
+    await loadBindings(record.id);
+  }
+  async function submitBind() {
+    if (!bindSkillId.value) {
+      createMessage.warning('请选择 Skill');
+      return;
+    }
+    await bindSkill({ agentId: currentAgent.value.id, skillId: bindSkillId.value });
+    createMessage.success('绑定成功');
+    bindSkillId.value = undefined;
+    await loadBindings(currentAgent.value.id);
+  }
+  async function removeBinding(record) {
+    await unbindSkill({ agentId: record.agentId, skillId: record.skillId });
+    createMessage.success('解绑成功');
+    await loadBindings(currentAgent.value.id);
+  }
+  async function loadSkillOptions() {
+    const result: any = await listSkills({ pageNo: 1, pageSize: 1000 });
+    const records = result?.records || result?.result?.records || [];
+    skillOptions.value = records.map((item) => ({
+      label: `${item.name} (${item.slug || item.id}@${item.version || '1.0.0'})`,
+      value: item.id,
+    }));
+  }
+  async function loadBindings(agentId: string) {
+    const result: any = await listAgentSkills({ agentId, pageNo: 1, pageSize: 1000 });
+    const records = result?.records || result?.result?.records || [];
+    bindingRows.value = records.map((item) => ({
+      ...item,
+      skillName: skillOptions.value.find((skill) => skill.value === item.skillId)?.label || item.skillId,
+    }));
   }
 </script>

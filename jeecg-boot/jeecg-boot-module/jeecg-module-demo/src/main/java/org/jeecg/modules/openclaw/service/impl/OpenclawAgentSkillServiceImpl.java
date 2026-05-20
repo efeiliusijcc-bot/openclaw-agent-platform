@@ -6,12 +6,12 @@ import org.jeecg.modules.openclaw.constant.OpenclawConstants;
 import org.jeecg.modules.openclaw.entity.OpenclawAgent;
 import org.jeecg.modules.openclaw.entity.OpenclawAgentSkill;
 import org.jeecg.modules.openclaw.entity.OpenclawSkill;
+import org.jeecg.modules.openclaw.mapper.OpenclawAgentMapper;
 import org.jeecg.modules.openclaw.mapper.OpenclawAgentSkillMapper;
-import org.jeecg.modules.openclaw.service.IOpenclawAgentService;
+import org.jeecg.modules.openclaw.mapper.OpenclawSkillMapper;
 import org.jeecg.modules.openclaw.service.IOpenclawAgentSkillService;
 import org.jeecg.modules.openclaw.service.IOpenclawAuditLogService;
 import org.jeecg.modules.openclaw.service.IOpenclawPermissionService;
-import org.jeecg.modules.openclaw.service.IOpenclawSkillService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -19,9 +19,9 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class OpenclawAgentSkillServiceImpl extends ServiceImpl<OpenclawAgentSkillMapper, OpenclawAgentSkill> implements IOpenclawAgentSkillService {
     @Autowired
-    private IOpenclawAgentService agentService;
+    private OpenclawAgentMapper agentMapper;
     @Autowired
-    private IOpenclawSkillService skillService;
+    private OpenclawSkillMapper skillMapper;
     @Autowired
     private IOpenclawPermissionService permissionService;
     @Autowired
@@ -30,11 +30,11 @@ public class OpenclawAgentSkillServiceImpl extends ServiceImpl<OpenclawAgentSkil
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void bindSkill(String agentId, String skillId) {
-        OpenclawAgent agent = agentService.getById(agentId);
+        OpenclawAgent agent = agentMapper.selectById(agentId);
         if (agent == null || Integer.valueOf(OpenclawConstants.DEL_FLAG_DELETED).equals(agent.getDelFlag())) {
             throw new JeecgBootException("Agent 不存在");
         }
-        OpenclawSkill skill = skillService.getById(skillId);
+        OpenclawSkill skill = skillMapper.selectById(skillId);
         if (skill == null || Integer.valueOf(OpenclawConstants.DEL_FLAG_DELETED).equals(skill.getDelFlag())) {
             throw new JeecgBootException("Skill 不存在");
         }
@@ -68,7 +68,7 @@ public class OpenclawAgentSkillServiceImpl extends ServiceImpl<OpenclawAgentSkil
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void unbindSkill(String agentId, String skillId) {
-        OpenclawAgent agent = agentService.getById(agentId);
+        OpenclawAgent agent = agentMapper.selectById(agentId);
         if (agent == null) {
             throw new JeecgBootException("Agent 不存在");
         }
