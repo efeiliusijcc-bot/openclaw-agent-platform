@@ -33,6 +33,7 @@ import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Date;
@@ -71,7 +72,7 @@ public class OpenclawGatewayConfigServiceImpl implements IOpenclawGatewayConfigS
         OpenclawGatewayNode node = requireNode(gatewayId);
         try {
             RenderedConfig rendered = render(node, true);
-            writeConfig(configPath(node), rendered.content);
+            writeConfig(configPath(node), rendered);
             node.setConfigPath(configPath(node));
             node.setWorkspaceRoot(workspaceRoot(node));
             node.setCurrentAgents(rendered.agentCount);
@@ -138,9 +139,15 @@ public class OpenclawGatewayConfigServiceImpl implements IOpenclawGatewayConfigS
 
         root.put("defaults", defaults);
         root.put("list", list);
+        JSONObject previewRoot = new JSONObject(true);
+        previewRoot.put("agents", root);
         String content = JSON.toJSONString(root, SerializerFeature.PrettyFormat);
+        String previewContent = JSON.toJSONString(previewRoot, SerializerFeature.PrettyFormat);
         RenderedConfig rendered = new RenderedConfig();
         rendered.content = content + System.lineSeparator();
+        rendered.previewContent = previewContent + System.lineSeparator();
+        rendered.agents = root;
+        rendered.agentList = list;
         rendered.agentCount = agents.size();
         rendered.skillCount = uniqueSkills.size();
         rendered.checksum = sha256(rendered.content);
@@ -193,7 +200,7 @@ public class OpenclawGatewayConfigServiceImpl implements IOpenclawGatewayConfigS
         }
     }
 
-    private void writeConfig(String configPath, String content) throws IOException {
+    private void writeConfig(String configPath, RenderedConfig rendered) throws IOException {
         if (!StringUtils.hasText(configPath)) {
             throw new JeecgBootException("Gateway config path is empty");
         }
@@ -206,8 +213,9 @@ public class OpenclawGatewayConfigServiceImpl implements IOpenclawGatewayConfigS
         if (!Files.isWritable(parent)) {
             throw new JeecgBootException("Gateway config parent directory is not writable: " + parent);
         }
+        String content = isOpenclawMainConfig(target) ? mergeOpenclawMainConfig(target, rendered) : rendered.content;
         Path temp = parent.resolve(target.getFileName().toString() + ".tmp-" + IdWorker.getIdStr());
-        Path backup = parent.resolve(target.getFileName().toString() + ".bak");
+        Path backup = parent.resolve(target.getFileName().toString() + ".bak." + new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));
         Files.writeString(temp, content, StandardCharsets.UTF_8);
         if (Files.exists(target)) {
             Files.copy(target, backup, StandardCopyOption.REPLACE_EXISTING);
@@ -217,6 +225,38 @@ public class OpenclawGatewayConfigServiceImpl implements IOpenclawGatewayConfigS
         } catch (IOException atomicMoveError) {
             Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING);
         }
+    }
+
+    private boolean isOpenclawMainConfig(Path target) {
+        return "openclaw.json".equals(target.getFileName().toString());
+    }
+
+    private String mergeOpenclawMainConfig(Path target, RenderedConfig rendered) throws IOException {
+        JSONObject root = Files.exists(target) ? JSON.parseObject(Files.readString(target, StandardCharsets.UTF_8)) : new JSONObject(true);
+        JSONObject agents = root.getJSONObject("agents");
+        if (agents == null) {
+            agents = new JSONObject(true);
+            root.put("agents", agents);
+        }
+        if (!agents.containsKey("defaults")) {
+            agents.put("defaults", rendered.agents.getJSONObject("defaults"));
+        }
+        JSONArray currentList = agents.getJSONArray("list");
+        JSONArray mergedList = new JSONArray();
+        if (currentList != null) {
+            for (Object item : currentList) {
+                if (!(item instanceof JSONObject)) {
+                    continue;
+                }
+                String id = ((JSONObject) item).getString("id");
+                if (!StringUtils.hasText(id) || !id.startsWith("agt_")) {
+                    mergedList.add(item);
+                }
+            }
+        }
+        mergedList.addAll(rendered.agentList);
+        agents.put("list", mergedList);
+        return JSON.toJSONString(root, SerializerFeature.PrettyFormat) + System.lineSeparator();
     }
 
     private String configPath(OpenclawGatewayNode node) {
@@ -237,7 +277,7 @@ public class OpenclawGatewayConfigServiceImpl implements IOpenclawGatewayConfigS
         result.setChecksum(rendered.checksum);
         result.setRestartRequired(true);
         result.setMessage(message);
-        result.setContent(includeContent ? rendered.content : null);
+        result.setContent(includeContent ? rendered.previewContent : null);
         return result;
     }
 
@@ -295,6 +335,9 @@ public class OpenclawGatewayConfigServiceImpl implements IOpenclawGatewayConfigS
 
     private static class RenderedConfig {
         private String content;
+        private String previewContent;
+        private JSONObject agents;
+        private JSONArray agentList;
         private int agentCount;
         private int skillCount;
         private String checksum;
