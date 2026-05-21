@@ -10,9 +10,20 @@ import org.jeecg.common.api.vo.Result;
 import org.jeecg.common.system.query.QueryGenerator;
 import org.jeecg.modules.openclaw.constant.OpenclawConstants;
 import org.jeecg.modules.openclaw.entity.OpenclawGatewayNode;
+import org.jeecg.modules.openclaw.service.IOpenclawGatewayConfigService;
 import org.jeecg.modules.openclaw.service.IOpenclawGatewayNodeService;
+import org.jeecg.modules.openclaw.vo.OpenclawGatewaySyncResultVO;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.util.StringUtils;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestMethod;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
 
 @Tag(name = "OpenClaw Gateway Node")
 @RestController
@@ -20,6 +31,8 @@ import org.springframework.web.bind.annotation.*;
 public class OpenclawGatewayNodeController {
     @Autowired
     private IOpenclawGatewayNodeService gatewayNodeService;
+    @Autowired
+    private IOpenclawGatewayConfigService gatewayConfigService;
 
     @GetMapping("/list")
     @RequiresPermissions("openclaw:gateway:list")
@@ -39,6 +52,7 @@ public class OpenclawGatewayNodeController {
         node.setCurrentAgents(0);
         node.setCurrentRunning(0);
         node.setStatus(node.getStatus() == null ? "offline" : node.getStatus());
+        fillGatewayDefaults(node);
         node.setDelFlag(OpenclawConstants.DEL_FLAG_NORMAL);
         gatewayNodeService.save(node);
         return Result.OK("新增成功");
@@ -47,6 +61,7 @@ public class OpenclawGatewayNodeController {
     @RequestMapping(value = "/edit", method = {RequestMethod.PUT, RequestMethod.POST})
     @RequiresPermissions("openclaw:gateway:edit")
     public Result<?> edit(@RequestBody OpenclawGatewayNode node) {
+        fillGatewayDefaults(node);
         gatewayNodeService.updateById(node);
         return Result.OK("更新成功");
     }
@@ -56,5 +71,29 @@ public class OpenclawGatewayNodeController {
     public Result<?> delete(@RequestParam String id) {
         gatewayNodeService.logicDeleteNode(id);
         return Result.OK("删除成功");
+    }
+
+    @GetMapping("/{id}/configPreview")
+    @RequiresPermissions("openclaw:gateway:list")
+    public Result<OpenclawGatewaySyncResultVO> configPreview(@PathVariable String id) {
+        return Result.OK(gatewayConfigService.preview(id));
+    }
+
+    @PostMapping("/{id}/sync")
+    @RequiresPermissions("openclaw:gateway:sync")
+    public Result<OpenclawGatewaySyncResultVO> sync(@PathVariable String id) {
+        return Result.OK(gatewayConfigService.sync(id));
+    }
+
+    private void fillGatewayDefaults(OpenclawGatewayNode node) {
+        if (!StringUtils.hasText(node.getConfigPath())) {
+            node.setConfigPath(OpenclawConstants.DEFAULT_GATEWAY_CONFIG_PATH);
+        }
+        if (!StringUtils.hasText(node.getWorkspaceRoot())) {
+            node.setWorkspaceRoot(OpenclawConstants.WORKSPACE_ROOT);
+        }
+        if (node.getRestartRequired() == null) {
+            node.setRestartRequired(1);
+        }
     }
 }

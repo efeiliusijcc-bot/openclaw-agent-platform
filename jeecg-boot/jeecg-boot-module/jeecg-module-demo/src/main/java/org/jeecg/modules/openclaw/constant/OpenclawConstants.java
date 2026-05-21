@@ -31,6 +31,7 @@ public final class OpenclawConstants {
 
     public static final String WORKSPACE_ROOT = "/data/openclaw-platform/workspaces";
     public static final String SKILL_ROOT = "/data/openclaw-platform/skills";
+    public static final String DEFAULT_GATEWAY_CONFIG_PATH = "/data/openclaw-gateway/.openclaw/jeecg-agents.json";
 
     public static final Set<String> BLOCKED_SKILL_EXTENSIONS = Set.of(
         ".exe", ".dll", ".so", ".dylib", ".bat", ".cmd", ".ps1", ".sh", ".jar", ".war", ".class"

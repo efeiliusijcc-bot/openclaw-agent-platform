@@ -34,6 +34,8 @@ public class OpenclawAgentServiceImpl extends ServiceImpl<OpenclawAgentMapper, O
     private IOpenclawAgentSkillService agentSkillService;
     @Autowired
     private IOpenclawAuditLogService auditLogService;
+    @Autowired
+    private OpenclawWorkspaceMaterializer workspaceMaterializer;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -68,6 +70,7 @@ public class OpenclawAgentServiceImpl extends ServiceImpl<OpenclawAgentMapper, O
         agent.setConfigJson(dto.getConfigJson());
         agent.setRemark(dto.getRemark());
         agent.setDelFlag(OpenclawConstants.DEL_FLAG_NORMAL);
+        workspaceMaterializer.materialize(agent, workspace);
         save(agent);
         auditLogService.log("agent_create", "agent", agent.getId(), agent);
         return agent;
@@ -91,6 +94,7 @@ public class OpenclawAgentServiceImpl extends ServiceImpl<OpenclawAgentMapper, O
         agent.setConfigJson(dto.getConfigJson());
         agent.setRemark(dto.getRemark());
         updateById(agent);
+        workspaceMaterializer.materialize(agent, workspaceService.getById(agent.getWorkspaceId()));
         auditLogService.log("agent_update", "agent", agent.getId(), agent);
     }
 
