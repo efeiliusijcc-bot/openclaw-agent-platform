@@ -146,8 +146,6 @@ public class OpenclawGatewayConfigServiceImpl implements IOpenclawGatewayConfigS
         RenderedConfig rendered = new RenderedConfig();
         rendered.content = content + System.lineSeparator();
         rendered.previewContent = previewContent + System.lineSeparator();
-        rendered.agents = root;
-        rendered.agentList = list;
         rendered.agentCount = agents.size();
         rendered.skillCount = uniqueSkills.size();
         rendered.checksum = sha256(rendered.content);
@@ -209,14 +207,14 @@ public class OpenclawGatewayConfigServiceImpl implements IOpenclawGatewayConfigS
         if (parent == null) {
             throw new JeecgBootException("Gateway config path must include parent directory");
         }
+        validateGeneratedConfigPath(target);
         Files.createDirectories(parent);
         if (!Files.isWritable(parent)) {
             throw new JeecgBootException("Gateway config parent directory is not writable: " + parent);
         }
-        String content = isOpenclawMainConfig(target) ? mergeOpenclawMainConfig(target, rendered) : rendered.content;
         Path temp = parent.resolve(target.getFileName().toString() + ".tmp-" + IdWorker.getIdStr());
         Path backup = parent.resolve(target.getFileName().toString() + ".bak." + new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));
-        Files.writeString(temp, content, StandardCharsets.UTF_8);
+        Files.writeString(temp, rendered.content, StandardCharsets.UTF_8);
         if (Files.exists(target)) {
             Files.copy(target, backup, StandardCopyOption.REPLACE_EXISTING);
         }
@@ -227,36 +225,14 @@ public class OpenclawGatewayConfigServiceImpl implements IOpenclawGatewayConfigS
         }
     }
 
-    private boolean isOpenclawMainConfig(Path target) {
-        return "openclaw.json".equals(target.getFileName().toString());
-    }
-
-    private String mergeOpenclawMainConfig(Path target, RenderedConfig rendered) throws IOException {
-        JSONObject root = Files.exists(target) ? JSON.parseObject(Files.readString(target, StandardCharsets.UTF_8)) : new JSONObject(true);
-        JSONObject agents = root.getJSONObject("agents");
-        if (agents == null) {
-            agents = new JSONObject(true);
-            root.put("agents", agents);
+    private void validateGeneratedConfigPath(Path target) {
+        String fileName = target.getFileName().toString();
+        if ("openclaw.json".equals(fileName)) {
+            throw new JeecgBootException("Gateway config path must point to the generated agents include file, not main openclaw.json");
         }
-        if (!agents.containsKey("defaults")) {
-            agents.put("defaults", rendered.agents.getJSONObject("defaults"));
+        if (!fileName.endsWith(".json")) {
+            throw new JeecgBootException("Gateway config path must be a json file");
         }
-        JSONArray currentList = agents.getJSONArray("list");
-        JSONArray mergedList = new JSONArray();
-        if (currentList != null) {
-            for (Object item : currentList) {
-                if (!(item instanceof JSONObject)) {
-                    continue;
-                }
-                String id = ((JSONObject) item).getString("id");
-                if (!StringUtils.hasText(id) || !id.startsWith("agt_")) {
-                    mergedList.add(item);
-                }
-            }
-        }
-        mergedList.addAll(rendered.agentList);
-        agents.put("list", mergedList);
-        return JSON.toJSONString(root, SerializerFeature.PrettyFormat) + System.lineSeparator();
     }
 
     private String configPath(OpenclawGatewayNode node) {
@@ -336,8 +312,6 @@ public class OpenclawGatewayConfigServiceImpl implements IOpenclawGatewayConfigS
     private static class RenderedConfig {
         private String content;
         private String previewContent;
-        private JSONObject agents;
-        private JSONArray agentList;
         private int agentCount;
         private int skillCount;
         private String checksum;
