@@ -12,11 +12,14 @@ import org.jeecg.common.system.query.QueryGenerator;
 import org.jeecg.modules.openclaw.constant.OpenclawConstants;
 import org.jeecg.modules.openclaw.dto.OpenclawAgentCreateDTO;
 import org.jeecg.modules.openclaw.dto.OpenclawAgentEditDTO;
+import org.jeecg.modules.openclaw.dto.OpenclawAgentRunTestDTO;
 import org.jeecg.modules.openclaw.dto.OpenclawAgentSkillBindDTO;
 import org.jeecg.modules.openclaw.entity.OpenclawAgent;
+import org.jeecg.modules.openclaw.service.IOpenclawAgentRunService;
 import org.jeecg.modules.openclaw.service.IOpenclawAgentService;
 import org.jeecg.modules.openclaw.service.IOpenclawAgentSkillService;
 import org.jeecg.modules.openclaw.service.IOpenclawPermissionService;
+import org.jeecg.modules.openclaw.vo.OpenclawAgentRunResultVO;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
@@ -28,6 +31,8 @@ public class OpenclawAgentController {
     private IOpenclawAgentService agentService;
     @Autowired
     private IOpenclawAgentSkillService agentSkillService;
+    @Autowired
+    private IOpenclawAgentRunService agentRunService;
     @Autowired
     private IOpenclawPermissionService permissionService;
 
@@ -99,5 +104,12 @@ public class OpenclawAgentController {
             permissionService.checkOwnerOrAdmin(agent.getUserId());
         }
         return Result.OK(agent);
+    }
+
+    @PostMapping("/{id}/run-test")
+    @AutoLog(value = "OpenClaw Agent run test")
+    @RequiresPermissions("openclaw:agent:list")
+    public Result<OpenclawAgentRunResultVO> runTest(@PathVariable String id, @RequestBody OpenclawAgentRunTestDTO dto) {
+        return Result.OK(agentRunService.runTest(id, dto));
     }
 }

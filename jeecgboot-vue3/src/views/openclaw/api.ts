@@ -33,3 +33,4 @@ export const syncGatewayConfig = (id: string) => defHttp.post({ url: `/openclaw/
 
 export const listAuditLogs = (params) => defHttp.get({ url: '/openclaw/audit/list', params });
 export const listAgentSkills = (params) => defHttp.get({ url: '/openclaw/agentSkill/list', params });
+export const runAgentTest = (id: string, params) => defHttp.post({ url: `/openclaw/agent/${id}/run-test`, params });

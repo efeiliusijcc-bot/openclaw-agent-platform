@@ -39,6 +39,23 @@
         </template>
       </a-table>
     </a-modal>
+    <a-modal v-model:open="runVisible" title="Run Test" :confirmLoading="runLoading" width="720px" destroyOnClose @ok="submitRunTest">
+      <a-form layout="vertical">
+        <a-form-item label="Prompt" required>
+          <a-textarea v-model:value="runPrompt" :rows="5" />
+        </a-form-item>
+      </a-form>
+      <a-descriptions v-if="runResult" size="small" bordered :column="1">
+        <a-descriptions-item label="Status">{{ runResult.status }}</a-descriptions-item>
+        <a-descriptions-item label="Duration(ms)">{{ runResult.durationMs }}</a-descriptions-item>
+        <a-descriptions-item v-if="runResult.outputSummary" label="Output">
+          <pre class="run-output">{{ runResult.outputSummary }}</pre>
+        </a-descriptions-item>
+        <a-descriptions-item v-if="runResult.errorMessage" label="Error">
+          <pre class="run-output">{{ runResult.errorMessage }}</pre>
+        </a-descriptions-item>
+      </a-descriptions>
+    </a-modal>
   </div>
 </template>
 
@@ -48,7 +65,7 @@
   import { useRouter } from 'vue-router';
   import { BasicTable, TableAction, useTable } from '/@/components/Table';
   import { useMessage } from '/@/hooks/web/useMessage';
-  import { addAgent, bindSkill, deleteAgent, disableAgent, editAgent, listAgentSkills, listAgents, listSkills, unbindSkill } from '../api';
+  import { addAgent, bindSkill, deleteAgent, disableAgent, editAgent, listAgentSkills, listAgents, listSkills, runAgentTest, unbindSkill } from '../api';
   import { commonTimeColumns, keywordSearch } from '../common';
 
   const { createMessage } = useMessage();
@@ -59,6 +76,10 @@
   const bindSkillId = ref<string>();
   const skillOptions = ref<any[]>([]);
   const bindingRows = ref<any[]>([]);
+  const runVisible = ref(false);
+  const runLoading = ref(false);
+  const runPrompt = ref('');
+  const runResult = ref<any>();
   const form = reactive<any>({});
   const bindingColumns = [
     { title: 'Skill', dataIndex: 'skillName' },
@@ -112,6 +133,7 @@
   function actions(record) {
     return [
       { label: '编辑', auth: 'openclaw:agent:edit', onClick: () => openEdit(record) },
+      { label: 'Run Test', auth: 'openclaw:agent:list', onClick: () => openRunTest(record) },
       { label: '绑定 Skill', auth: 'openclaw:agent:bindSkill', onClick: () => openBind(record) },
       { label: '运行记录', auth: 'openclaw:run:list', onClick: () => router.push({ path: '/openclaw/run', query: { agentId: record.id } }) },
       {
@@ -133,6 +155,30 @@
     bindVisible.value = true;
     await loadSkillOptions();
     await loadBindings(record.id);
+  }
+  function openRunTest(record) {
+    currentAgent.value = record;
+    runPrompt.value = 'Reply with exactly: OK';
+    runResult.value = undefined;
+    runVisible.value = true;
+  }
+  async function submitRunTest() {
+    if (!runPrompt.value || !runPrompt.value.trim()) {
+      createMessage.warning('Please enter a prompt');
+      return;
+    }
+    runLoading.value = true;
+    try {
+      const result: any = await runAgentTest(currentAgent.value.id, { prompt: runPrompt.value });
+      runResult.value = result?.result || result;
+      if (runResult.value?.status === 'success') {
+        createMessage.success('Run completed');
+      } else {
+        createMessage.error(runResult.value?.errorMessage || 'Run failed');
+      }
+    } finally {
+      runLoading.value = false;
+    }
   }
   async function submitBind() {
     if (!bindSkillId.value) {
@@ -166,3 +212,13 @@
     }));
   }
 </script>
+
+<style scoped>
+  .run-output {
+    margin: 0;
+    max-height: 260px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+</style>
