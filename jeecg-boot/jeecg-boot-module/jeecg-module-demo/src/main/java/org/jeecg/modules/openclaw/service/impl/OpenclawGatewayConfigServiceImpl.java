@@ -131,8 +131,6 @@ public class OpenclawGatewayConfigServiceImpl implements IOpenclawGatewayConfigS
             item.put("skills", skillSlugs);
             JSONObject identity = new JSONObject(true);
             identity.put("name", agent.getName());
-            identity.put("username", agent.getUsername());
-            identity.put("userId", agent.getUserId());
             item.put("identity", identity);
             list.add(item);
         }
