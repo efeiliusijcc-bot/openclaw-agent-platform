@@ -9,6 +9,9 @@ rebel.xml
 
 ## front
 **/*.lock
+jeecgboot-vue3/dist/
+jeecgboot-vue3/dist*.tgz
+jeecgboot-vue3/dist.tar.gz
 os_del.cmd
 os_del_doc.cmd
 .svn

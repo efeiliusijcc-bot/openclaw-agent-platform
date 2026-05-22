@@ -22,6 +22,11 @@ public final class OpenclawConstants {
     public static final String SKILL_STATUS_PRIVATE = "private";
     public static final String SKILL_STATUS_DISABLED = "disabled";
 
+    public static final String RUN_STATUS_RUNNING = "running";
+    public static final String RUN_STATUS_SUCCESS = "success";
+    public static final String RUN_STATUS_FAILED = "failed";
+    public static final String RUN_STATUS_TIMEOUT = "timeout";
+
     public static final int DEL_FLAG_NORMAL = 0;
     public static final int DEL_FLAG_DELETED = 1;
 

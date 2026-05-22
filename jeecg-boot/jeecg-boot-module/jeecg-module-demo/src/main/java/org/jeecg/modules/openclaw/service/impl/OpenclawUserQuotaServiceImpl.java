@@ -164,7 +164,7 @@ public class OpenclawUserQuotaServiceImpl extends ServiceImpl<OpenclawUserQuotaM
     private LambdaQueryWrapper<OpenclawAgentRun> runningRunWrapper(String userId) {
         return new LambdaQueryWrapper<OpenclawAgentRun>()
             .eq(OpenclawAgentRun::getUserId, userId)
-            .eq(OpenclawAgentRun::getStatus, "running")
+            .eq(OpenclawAgentRun::getStatus, OpenclawConstants.RUN_STATUS_RUNNING)
             .eq(OpenclawAgentRun::getDelFlag, OpenclawConstants.DEL_FLAG_NORMAL);
     }
 }

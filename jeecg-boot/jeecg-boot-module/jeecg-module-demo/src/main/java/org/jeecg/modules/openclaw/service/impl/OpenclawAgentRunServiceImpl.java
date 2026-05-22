@@ -76,11 +76,20 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
             updateById(run);
             auditLogService.log("agent_run_test", "agent_run", run.getId(), toResult(run, agent));
             return toResult(run, agent);
+        } catch (RunTimeoutException e) {
+            Date finishTime = new Date();
+            run.setFinishTime(finishTime);
+            run.setDurationMs(finishTime.getTime() - startTime.getTime());
+            run.setStatus(OpenclawConstants.RUN_STATUS_TIMEOUT);
+            run.setErrorMessage(trim(e.getMessage(), MAX_ERROR_LENGTH));
+            updateById(run);
+            auditLogService.log("agent_run_test", "agent_run", run.getId(), toResult(run, agent));
+            return toResult(run, agent);
         } catch (Exception e) {
             Date finishTime = new Date();
             run.setFinishTime(finishTime);
             run.setDurationMs(finishTime.getTime() - startTime.getTime());
-            run.setStatus("failed");
+            run.setStatus(OpenclawConstants.RUN_STATUS_FAILED);
             run.setErrorMessage(trim(e.getMessage(), MAX_ERROR_LENGTH));
             updateById(run);
             auditLogService.log("agent_run_test", "agent_run", run.getId(), toResult(run, agent));
@@ -109,7 +118,7 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
         }
         prompt = prompt.trim();
         if (prompt.length() > MAX_PROMPT_LENGTH) {
-            throw new JeecgBootException("Prompt is too long");
+            throw new JeecgBootException("Prompt is too long, max length is " + MAX_PROMPT_LENGTH);
         }
         return prompt;
     }
@@ -140,7 +149,7 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
         }
         Long runningRuns = lambdaQuery()
             .eq(OpenclawAgentRun::getUserId, user.getId())
-            .eq(OpenclawAgentRun::getStatus, "running")
+            .eq(OpenclawAgentRun::getStatus, OpenclawConstants.RUN_STATUS_RUNNING)
             .eq(OpenclawAgentRun::getDelFlag, OpenclawConstants.DEL_FLAG_NORMAL)
             .count();
         if (quota.getMaxConcurrentRuns() != null && runningRuns >= quota.getMaxConcurrentRuns()) {
@@ -154,7 +163,7 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
         run.setUsername(user.getUsername());
         run.setAgentId(agent.getId());
         run.setAgentName(agent.getName());
-        run.setStatus("running");
+        run.setStatus(OpenclawConstants.RUN_STATUS_RUNNING);
         run.setInputSummary(trim(prompt, MAX_SUMMARY_LENGTH));
         run.setStartTime(startTime);
         run.setDelFlag(OpenclawConstants.DEL_FLAG_NORMAL);
@@ -181,7 +190,7 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
         boolean finished = process.waitFor(timeoutSeconds() + 5, TimeUnit.SECONDS);
         if (!finished) {
             process.destroyForcibly();
-            throw new JeecgBootException("OpenClaw CLI timed out after " + timeoutSeconds() + " seconds");
+            throw new RunTimeoutException("OpenClaw CLI timed out after " + timeoutSeconds() + " seconds");
         }
         CliResult result = new CliResult();
         result.exitCode = process.exitValue();
@@ -205,10 +214,15 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
 
     private void applyCliResult(OpenclawAgentRun run, CliResult result) {
         ParsedOutput parsed = parseOutput(result.stdout);
+        boolean timeout = OpenclawConstants.RUN_STATUS_TIMEOUT.equalsIgnoreCase(parsed.status);
         boolean success = result.exitCode == 0 && ("ok".equalsIgnoreCase(parsed.status) || !StringUtils.hasText(parsed.status));
-        run.setStatus(success ? "success" : "failed");
+        if (timeout) {
+            run.setStatus(OpenclawConstants.RUN_STATUS_TIMEOUT);
+        } else {
+            run.setStatus(success ? OpenclawConstants.RUN_STATUS_SUCCESS : OpenclawConstants.RUN_STATUS_FAILED);
+        }
         run.setOutputSummary(trim(parsed.outputSummary, MAX_SUMMARY_LENGTH));
-        if (!success) {
+        if (!success || timeout) {
             String error = firstText(result.stderr, parsed.errorMessage, "OpenClaw CLI exited with code " + result.exitCode);
             run.setErrorMessage(trim(error, MAX_ERROR_LENGTH));
         }
@@ -288,5 +302,11 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
         private String status;
         private String outputSummary;
         private String errorMessage;
+    }
+
+    private static class RunTimeoutException extends RuntimeException {
+        private RunTimeoutException(String message) {
+            super(message);
+        }
     }
 }
