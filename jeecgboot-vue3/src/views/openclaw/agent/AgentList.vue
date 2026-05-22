@@ -157,7 +157,13 @@
       ...commonTimeColumns,
     ],
     formConfig: { labelWidth: 90, schemas: keywordSearch() },
-    actionColumn: { width: 250, fixed: 'right' },
+    actionColumn: {
+      title: 'Action',
+      dataIndex: 'action',
+      width: 300,
+      fixed: 'right',
+      slots: { customRender: 'action' },
+    },
   });
 
   function reset(data: any = {}) {
