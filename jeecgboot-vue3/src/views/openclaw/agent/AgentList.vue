@@ -3,7 +3,7 @@
     <BasicTable @register="registerTable">
       <template #tableTitle>
         <a-button type="primary" preIcon="ant-design:plus-outlined" v-auth="'openclaw:agent:add'" @click="openAdd">
-          New Agent
+          新增 Agent
         </a-button>
       </template>
       <template #bodyCell="{ column, record }">
@@ -16,7 +16,7 @@
       </template>
     </BasicTable>
 
-    <a-modal v-model:open="visible" :title="form.id ? 'Edit Agent' : 'New Agent'" @ok="submit" destroyOnClose>
+    <a-modal v-model:open="visible" :title="form.id ? '编辑 Agent' : '新增 Agent'" okText="确定" cancelText="取消" @ok="submit" destroyOnClose>
       <a-form :model="form" layout="vertical">
         <a-form-item label="Agent Name" required>
           <a-input v-model:value="form.name" />
@@ -39,7 +39,7 @@
       </a-form>
     </a-modal>
 
-    <a-modal v-model:open="bindVisible" title="Bind Skill" :footer="null" width="720px" destroyOnClose>
+    <a-modal v-model:open="bindVisible" title="绑定 Skill" :footer="null" width="720px" destroyOnClose>
       <a-space style="width: 100%; margin-bottom: 12px">
         <a-select
           v-model:value="bindSkillId"
@@ -47,15 +47,15 @@
           allow-clear
           optionFilterProp="label"
           :options="skillOptions"
-          placeholder="Select Skill"
+          placeholder="请选择 Skill"
           style="width: 420px"
         />
-        <a-button type="primary" v-auth="'openclaw:agent:bindSkill'" @click="submitBind">Bind</a-button>
+        <a-button type="primary" v-auth="'openclaw:agent:bindSkill'" @click="submitBind">绑定</a-button>
       </a-space>
       <a-table size="small" rowKey="id" :columns="bindingColumns" :dataSource="bindingRows" :pagination="false">
         <template #bodyCell="{ column, record }">
           <template v-if="column.key === 'action'">
-            <a-button type="link" danger v-auth="'openclaw:agent:unbindSkill'" @click="removeBinding(record)">Unbind</a-button>
+            <a-button type="link" danger v-auth="'openclaw:agent:unbindSkill'" @click="removeBinding(record)">解绑</a-button>
           </template>
         </template>
       </a-table>
@@ -63,7 +63,9 @@
 
     <a-modal
       v-model:open="runVisible"
-      title="Run Test"
+      title="运行测试"
+      okText="运行"
+      cancelText="取消"
       :confirmLoading="runLoading"
       width="720px"
       destroyOnClose
@@ -76,7 +78,7 @@
             :rows="5"
             :maxlength="MAX_PROMPT_LENGTH"
             show-count
-            placeholder="Enter a test prompt"
+            placeholder="请输入测试 Prompt"
           />
         </a-form-item>
       </a-form>
@@ -136,7 +138,7 @@
     { title: 'Skill ID', dataIndex: 'skillId', width: 220 },
     { title: 'Enabled', dataIndex: 'enabled', width: 90 },
     { title: 'Create Time', dataIndex: 'createTime', width: 170 },
-    { title: 'Action', key: 'action', width: 90 },
+    { title: '操作', key: 'action', width: 90 },
   ];
 
   const [registerTable, { reload }] = useTable({
@@ -158,7 +160,7 @@
     ],
     formConfig: { labelWidth: 90, schemas: keywordSearch() },
     actionColumn: {
-      title: 'Action',
+      title: '操作',
       dataIndex: 'action',
       width: 300,
       fixed: 'right',
@@ -183,7 +185,7 @@
 
   async function submit() {
     if (!form.name) {
-      createMessage.warning('Please enter agent name');
+      createMessage.warning('请输入 Agent 名称');
       return;
     }
     await (form.id ? editAgent(form) : addAgent(form));
@@ -193,20 +195,20 @@
 
   function actions(record) {
     return [
-      { label: 'Edit', auth: 'openclaw:agent:edit', onClick: () => openEdit(record) },
-      { label: 'Run Test', auth: 'openclaw:agent:list', onClick: () => openRunTest(record) },
-      { label: 'Bind Skill', auth: 'openclaw:agent:bindSkill', onClick: () => openBind(record) },
-      { label: 'Runs', auth: 'openclaw:run:list', onClick: () => router.push({ path: '/openclaw/run', query: { agentId: record.id } }) },
+      { label: '编辑', auth: 'openclaw:agent:edit', onClick: () => openEdit(record) },
+      { label: '运行测试', onClick: () => openRunTest(record) },
+      { label: '绑定 Skill', auth: 'openclaw:agent:bindSkill', onClick: () => openBind(record) },
+      { label: '运行记录', onClick: () => router.push({ path: '/openclaw/run', query: { agentId: record.id } }) },
       {
-        label: 'Delete',
+        label: '删除',
         color: 'error',
         auth: 'openclaw:agent:delete',
-        popConfirm: { title: 'Confirm delete this agent?', confirm: async () => (await deleteAgent({ id: record.id }), reload()) },
+        popConfirm: { title: '确认删除该 Agent？', confirm: async () => (await deleteAgent({ id: record.id }), reload()) },
       },
       {
-        label: 'Disable',
+        label: '禁用',
         auth: 'openclaw:agent:disable',
-        onClick: () => Modal.confirm({ title: 'Confirm disable this agent?', onOk: async () => (await disableAgent({ id: record.id }), reload()) }),
+        onClick: () => Modal.confirm({ title: '确认禁用该 Agent？', okText: '确定', cancelText: '取消', onOk: async () => (await disableAgent({ id: record.id }), reload()) }),
       },
     ];
   }
@@ -229,11 +231,11 @@
   async function submitRunTest() {
     const prompt = (runPrompt.value || '').trim();
     if (!prompt) {
-      createMessage.warning('Prompt cannot be empty');
+      createMessage.warning('Prompt 不能为空');
       return;
     }
     if (prompt.length > MAX_PROMPT_LENGTH) {
-      createMessage.warning(`Prompt length cannot exceed ${MAX_PROMPT_LENGTH}`);
+      createMessage.warning(`Prompt 长度不能超过 ${MAX_PROMPT_LENGTH}`);
       return;
     }
     runLoading.value = true;
@@ -241,11 +243,11 @@
       const result: any = await runAgentTest(currentAgent.value.id, { prompt });
       runResult.value = result?.result || result;
       if (runResult.value?.status === 'success') {
-        createMessage.success('Run completed');
+        createMessage.success('运行完成');
       } else if (runResult.value?.status === 'timeout') {
-        createMessage.warning(runResult.value?.errorMessage || 'Run timeout');
+        createMessage.warning(runResult.value?.errorMessage || '运行超时');
       } else {
-        createMessage.error(runResult.value?.errorMessage || 'Run failed');
+        createMessage.error(runResult.value?.errorMessage || '运行失败');
       }
     } finally {
       runLoading.value = false;
@@ -254,18 +256,18 @@
 
   async function submitBind() {
     if (!bindSkillId.value) {
-      createMessage.warning('Please select a skill');
+      createMessage.warning('请选择 Skill');
       return;
     }
     await bindSkill({ agentId: currentAgent.value.id, skillId: bindSkillId.value });
-    createMessage.success('Bind success');
+    createMessage.success('绑定成功');
     bindSkillId.value = undefined;
     await loadBindings(currentAgent.value.id);
   }
 
   async function removeBinding(record) {
     await unbindSkill({ agentId: record.agentId, skillId: record.skillId });
-    createMessage.success('Unbind success');
+    createMessage.success('解绑成功');
     await loadBindings(currentAgent.value.id);
   }
 

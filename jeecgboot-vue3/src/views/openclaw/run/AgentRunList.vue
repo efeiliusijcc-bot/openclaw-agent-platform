@@ -5,11 +5,11 @@
         <a-tag :color="statusColor(text)">{{ text || '-' }}</a-tag>
       </template>
       <template #action="{ record }">
-        <TableAction :actions="[{ label: 'View Detail', onClick: () => openDetail(record) }]" />
+        <TableAction :actions="[{ label: '查看详情', onClick: () => openDetail(record) }]" />
       </template>
     </BasicTable>
 
-    <a-modal v-model:open="detailVisible" title="Run Detail" :footer="null" width="860px" destroyOnClose>
+    <a-modal v-model:open="detailVisible" title="运行详情" :footer="null" width="860px" destroyOnClose>
       <a-descriptions v-if="detailRecord" bordered :column="1" size="small">
         <a-descriptions-item label="Agent">{{ detailRecord.agentName }}</a-descriptions-item>
         <a-descriptions-item label="Status">
@@ -47,7 +47,7 @@
   const detailRecord = ref<any>();
 
   const [registerTable] = useTable({
-    title: 'Agent Run Records',
+    title: 'Agent 运行记录',
     api: listRuns,
     rowKey: 'id',
     bordered: true,
@@ -64,7 +64,7 @@
       { title: 'Duration (ms)', dataIndex: 'durationMs', width: 120 },
     ],
     formConfig: { labelWidth: 90, schemas: keywordSearch('agentName', 'Agent') },
-    actionColumn: { title: 'Action', width: 120, fixed: 'right', slots: { customRender: 'action' } },
+    actionColumn: { title: '操作', width: 120, fixed: 'right', slots: { customRender: 'action' } },
   });
 
   function openDetail(record: any) {
