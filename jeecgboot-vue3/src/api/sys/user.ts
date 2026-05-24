@@ -13,6 +13,7 @@ import { ExceptionEnum } from "@/enums/exceptionEnum";
 const { createErrorModal } = useMessage();
 enum Api {
   Login = '/sys/login',
+  HeaderSsoLogin = '/sys/sso/header-login',
   phoneLogin = '/sys/phoneLogin',
   Logout = '/sys/logout',
   GetUserInfo = '/sys/user/getUserInfo',
@@ -53,6 +54,20 @@ export function loginApi(params: LoginParams, mode: ErrorMessageMode = 'modal') 
     {
       url: Api.Login,
       params,
+    },
+    {
+      errorMessageMode: mode,
+    }
+  );
+}
+
+/**
+ * @description: oauth2-proxy Header SSO login api
+ */
+export function headerSsoLoginApi(mode: ErrorMessageMode = 'modal') {
+  return defHttp.get<LoginResultModel>(
+    {
+      url: Api.HeaderSsoLogin,
     },
     {
       errorMessageMode: mode,

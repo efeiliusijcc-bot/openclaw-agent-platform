@@ -26,6 +26,8 @@ public class OpenclawAgentSkillServiceImpl extends ServiceImpl<OpenclawAgentSkil
     private IOpenclawPermissionService permissionService;
     @Autowired
     private IOpenclawAuditLogService auditLogService;
+    @Autowired
+    private OpenclawSkillMaterializer skillMaterializer;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -62,6 +64,7 @@ public class OpenclawAgentSkillServiceImpl extends ServiceImpl<OpenclawAgentSkil
         binding.setEnabled(1);
         binding.setDelFlag(OpenclawConstants.DEL_FLAG_NORMAL);
         saveOrUpdate(binding);
+        skillMaterializer.copySkillToAgent(agent, skill);
         auditLogService.log("agent_bind_skill", "agent_skill", binding.getId(), binding);
     }
 
@@ -84,6 +87,8 @@ public class OpenclawAgentSkillServiceImpl extends ServiceImpl<OpenclawAgentSkil
         binding.setEnabled(0);
         binding.setDelFlag(OpenclawConstants.DEL_FLAG_DELETED);
         updateById(binding);
+        OpenclawSkill skill = skillMapper.selectById(skillId);
+        skillMaterializer.removeSkillFromAgent(agent, skill);
         auditLogService.log("agent_unbind_skill", "agent_skill", binding.getId(), binding);
     }
 

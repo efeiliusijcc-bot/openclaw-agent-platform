@@ -30,6 +30,15 @@ public class OpenclawGatewayNode extends JeecgEntity implements Serializable {
     @JsonFormat(timezone = "GMT+8", pattern = "yyyy-MM-dd HH:mm:ss")
     @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private Date lastHeartbeat;
+    private String configPath;
+    private String workspaceRoot;
+    @JsonFormat(timezone = "GMT+8", pattern = "yyyy-MM-dd HH:mm:ss")
+    @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss")
+    private Date lastSyncTime;
+    private String lastSyncStatus;
+    private String lastSyncMessage;
+    private String lastSyncChecksum;
+    private Integer restartRequired;
     private String remark;
     private Integer delFlag;
 }

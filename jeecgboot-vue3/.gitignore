@@ -2,6 +2,8 @@ node_modules
 .DS_Store
 .github
 dist
+dist*.tgz
+dist.tar.gz
 .cache
 .playwright-mcp
 

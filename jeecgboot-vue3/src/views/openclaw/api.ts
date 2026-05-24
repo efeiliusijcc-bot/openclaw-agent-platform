@@ -28,6 +28,9 @@ export const listGateways = (params) => defHttp.get({ url: '/openclaw/gateway/li
 export const addGateway = (params) => defHttp.post({ url: '/openclaw/gateway/add', params });
 export const editGateway = (params) => defHttp.post({ url: '/openclaw/gateway/edit', params });
 export const deleteGateway = (params) => defHttp.delete({ url: '/openclaw/gateway/delete', params }, { joinParamsToUrl: true });
+export const previewGatewayConfig = (id: string) => defHttp.get({ url: `/openclaw/gateway/${id}/configPreview` });
+export const syncGatewayConfig = (id: string) => defHttp.post({ url: `/openclaw/gateway/${id}/sync` });
 
 export const listAuditLogs = (params) => defHttp.get({ url: '/openclaw/audit/list', params });
 export const listAgentSkills = (params) => defHttp.get({ url: '/openclaw/agentSkill/list', params });
+export const runAgentTest = (id: string, params) => defHttp.post({ url: `/openclaw/agent/${id}/run-test`, params, timeout: 90 * 1000 });

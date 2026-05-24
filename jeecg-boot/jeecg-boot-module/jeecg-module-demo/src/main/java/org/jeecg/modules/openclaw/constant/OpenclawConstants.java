@@ -22,6 +22,11 @@ public final class OpenclawConstants {
     public static final String SKILL_STATUS_PRIVATE = "private";
     public static final String SKILL_STATUS_DISABLED = "disabled";
 
+    public static final String RUN_STATUS_RUNNING = "running";
+    public static final String RUN_STATUS_SUCCESS = "success";
+    public static final String RUN_STATUS_FAILED = "failed";
+    public static final String RUN_STATUS_TIMEOUT = "timeout";
+
     public static final int DEL_FLAG_NORMAL = 0;
     public static final int DEL_FLAG_DELETED = 1;
 
@@ -31,6 +36,7 @@ public final class OpenclawConstants {
 
     public static final String WORKSPACE_ROOT = "/data/openclaw-platform/workspaces";
     public static final String SKILL_ROOT = "/data/openclaw-platform/skills";
+    public static final String DEFAULT_GATEWAY_CONFIG_PATH = "/data/openclaw-gateway/.openclaw/jeecg-agents.json";
 
     public static final Set<String> BLOCKED_SKILL_EXTENSIONS = Set.of(
         ".exe", ".dll", ".so", ".dylib", ".bat", ".cmd", ".ps1", ".sh", ".jar", ".war", ".class"
