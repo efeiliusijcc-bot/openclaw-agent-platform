@@ -7,7 +7,7 @@ import { PageEnum } from '/@/enums/pageEnum';
 import { ROLES_KEY, TOKEN_KEY, USER_INFO_KEY, LOGIN_INFO_KEY, DB_DICT_DATA_KEY, TENANT_ID, OAUTH2_THIRD_LOGIN_TENANT_ID } from '/@/enums/cacheEnum';
 import { getAuthCache, setAuthCache, removeAuthCache } from '/@/utils/auth';
 import { GetUserInfoModel, LoginParams, ThirdLoginParams } from '/@/api/sys/model/userModel';
-import { doLogout, getUserInfo, loginApi, phoneLoginApi, thirdLogin } from '/@/api/sys/user';
+import { doLogout, getUserInfo, headerSsoLoginApi, loginApi, phoneLoginApi, thirdLogin } from '/@/api/sys/user';
 import { useI18n } from '/@/hooks/web/useI18n';
 import { useMessage } from '/@/hooks/web/useMessage';
 import { router } from '/@/router';
@@ -163,6 +163,18 @@ export const useUserStore = defineStore({
     /**
      * 扫码登录事件
      */
+    async headerSsoLogin(params: { goHome?: boolean; mode?: ErrorMessageMode } = {}): Promise<GetUserInfoModel | null> {
+      try {
+        const { goHome = true, mode = 'message' } = params;
+        const data = await headerSsoLoginApi(mode);
+        const { token, userInfo } = data;
+        this.setTenant(userInfo?.loginTenantId);
+        this.setToken(token);
+        return this.afterLoginAction(goHome, data);
+      } catch (error) {
+        return Promise.reject(error);
+      }
+    },
     async qrCodeLogin(token): Promise<GetUserInfoModel | null> {
       try {
         // save token

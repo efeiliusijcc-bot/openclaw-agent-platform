@@ -28,8 +28,10 @@ import org.jeecg.config.shiro.IgnoreAuth;
 import org.jeecg.modules.base.service.BaseCommonService;
 import org.jeecg.modules.system.constant.DefIndexConst;
 import org.jeecg.modules.system.entity.SysDepart;
+import org.jeecg.modules.system.entity.SysRole;
 import org.jeecg.modules.system.entity.SysRoleIndex;
 import org.jeecg.modules.system.entity.SysUser;
+import org.jeecg.modules.system.entity.SysUserRole;
 import org.jeecg.modules.system.model.SysLoginModel;
 import org.jeecg.modules.system.service.*;
 import org.jeecg.modules.system.service.impl.SysBaseApiImpl;
@@ -66,7 +68,11 @@ public class LoginController {
 	@Autowired
     private ISysDepartService sysDepartService;
 	@Autowired
-    private ISysDictService sysDictService;
+	private ISysDictService sysDictService;
+	@Autowired
+	private ISysRoleService sysRoleService;
+	@Autowired
+	private ISysUserRoleService sysUserRoleService;
 	@Resource
 	private BaseCommonService baseCommonService;
 	@Autowired
@@ -171,6 +177,44 @@ public class LoginController {
 		log.debug("end 获取用户信息耗时 " + (System.currentTimeMillis() - start) + "毫秒");
 		return result;
 
+	}
+
+	/**
+	 * Header SSO login for oauth2-proxy protected JeecgBoot entry.
+	 */
+	@IgnoreAuth
+	@GetMapping("/sso/header-login")
+	public Result<JSONObject> headerSsoLogin(HttpServletRequest request) {
+		Result<JSONObject> result = new Result<>();
+		String email = normalizeHeader(request.getHeader("X-Auth-Request-Email"));
+		String externalUser = normalizeHeader(request.getHeader("X-Auth-Request-User"));
+		String groups = normalizeHeader(request.getHeader("X-Auth-Request-Groups"));
+		if (oConvertUtils.isEmpty(email)) {
+			return result.error500("SSO login failed: missing X-Auth-Request-Email");
+		}
+
+		SysUser sysUser = sysUserService.getUserByEmail(email);
+		if (sysUser == null) {
+			sysUser = createHeaderSsoUser(email, externalUser);
+		}
+
+		Result<?> effectiveResult = sysUserService.checkUserIsEffective(sysUser);
+		if (!effectiveResult.isSuccess()) {
+			result.setSuccess(false);
+			result.setCode(effectiveResult.getCode());
+			result.setMessage(effectiveResult.getMessage());
+			return result;
+		}
+
+		List<String> roleCodes = resolveHeaderSsoRoleCodes(groups);
+		syncHeaderSsoRoles(sysUser.getId(), roleCodes);
+		sysUser = sysUserService.getUserByName(sysUser.getUsername());
+		userInfo(sysUser, result, request, CommonConstant.CLIENT_TYPE_PC);
+
+		LoginUser loginUser = new LoginUser();
+		BeanUtils.copyProperties(sysUser, loginUser);
+		baseCommonService.addLog("Header SSO login success: " + email, CommonConstant.LOG_TYPE_1, null, loginUser);
+		return result;
 	}
 	
 	/**
@@ -537,6 +581,92 @@ public class LoginController {
 		result.setResult(obj);
 		result.success("登录成功");
 		return result;
+	}
+
+	private String normalizeHeader(String value) {
+		return value == null ? null : value.trim();
+	}
+
+	private SysUser createHeaderSsoUser(String email, String externalUser) {
+		String username = buildHeaderSsoUsername(email);
+		String salt = oConvertUtils.randomGen(8);
+		String rawPassword = UUID.randomUUID().toString();
+		SysUser user = new SysUser();
+		user.setUsername(username);
+		user.setRealname(oConvertUtils.isNotEmpty(externalUser) ? externalUser : email);
+		user.setEmail(email);
+		user.setSalt(salt);
+		user.setPassword(PasswordUtil.encrypt(username, rawPassword, salt));
+		user.setStatus(CommonConstant.USER_UNFREEZE);
+		user.setDelFlag(CommonConstant.DEL_FLAG_0);
+		user.setActivitiSync(CommonConstant.ACT_SYNC_1);
+		user.setUserIdentity(CommonConstant.USER_IDENTITY_1);
+		user.setCreateBy("header_sso");
+		user.setCreateTime(new Date());
+		sysUserService.save(user);
+		return user;
+	}
+
+	private String buildHeaderSsoUsername(String email) {
+		String normalized = email.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9_]", "_");
+		if (normalized.length() > 48) {
+			normalized = normalized.substring(0, 48);
+		}
+		String username = "sso_" + normalized;
+		SysUser existing = sysUserService.getUserByName(username);
+		if (existing == null || email.equalsIgnoreCase(existing.getEmail())) {
+			return username;
+		}
+		return "sso_" + Integer.toUnsignedString(email.toLowerCase(Locale.ROOT).hashCode(), 16);
+	}
+
+	private List<String> resolveHeaderSsoRoleCodes(String groups) {
+		Set<String> groupSet = new HashSet<>();
+		if (oConvertUtils.isNotEmpty(groups)) {
+			for (String group : groups.split("[,;\\s]+")) {
+				if (oConvertUtils.isNotEmpty(group)) {
+					String normalizedGroup = group.trim().replaceAll("^[\\[\\]\"]+|[\\[\\]\"]+$", "");
+					if (oConvertUtils.isNotEmpty(normalizedGroup)) {
+						groupSet.add(normalizedGroup);
+					}
+				}
+			}
+		}
+		LinkedHashSet<String> roleCodes = new LinkedHashSet<>();
+		roleCodes.add("openclaw_employee");
+		if (groupSet.contains("/openclaw-admins")) {
+			roleCodes.add("openclaw_admin");
+		}
+		if (groupSet.contains("/openclaw-skill-reviewer")) {
+			roleCodes.add("openclaw_skill_reviewer");
+		}
+		if (groupSet.contains("/openclaw-users")) {
+			roleCodes.add("openclaw_employee");
+		}
+		return new ArrayList<>(roleCodes);
+	}
+
+	private void syncHeaderSsoRoles(String userId, List<String> roleCodes) {
+		List<String> managedCodes = Arrays.asList("openclaw_employee", "openclaw_admin", "openclaw_skill_reviewer");
+		List<String> managedRoleIds = new ArrayList<>();
+		List<String> targetRoleIds = new ArrayList<>();
+		for (String roleCode : managedCodes) {
+			SysRole role = sysRoleService.getRoleNoTenant(roleCode);
+			if (role == null) {
+				throw new IllegalStateException("Missing JeecgBoot role: " + roleCode);
+			}
+			managedRoleIds.add(role.getId());
+			if (roleCodes.contains(roleCode)) {
+				targetRoleIds.add(role.getId());
+			}
+		}
+		sysUserRoleService.remove(new LambdaQueryWrapper<SysUserRole>()
+				.eq(SysUserRole::getUserId, userId)
+				.in(SysUserRole::getRoleId, managedRoleIds));
+		for (String roleId : targetRoleIds) {
+			sysUserRoleService.save(new SysUserRole(userId, roleId));
+		}
+		redisUtil.del(CommonConstant.PREFIX_USER_SHIRO_CACHE + userId);
 	}
 
 	/**

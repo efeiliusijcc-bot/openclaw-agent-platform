@@ -13,6 +13,8 @@ import {isOAuth2AppEnv, isOAuth2DingAppEnv} from '/@/views/sys/login/useLogin';
 import { OAUTH2_THIRD_LOGIN_TENANT_ID } from "/@/enums/cacheEnum";
 import { setAuthCache } from "/@/utils/auth";
 import { PAGE_NOT_FOUND_NAME_404 } from '/@/router/constant';
+import { isHeaderSsoEnv } from '/@/hooks/web/useHeaderSso';
+import { useMessage } from '/@/hooks/web/useMessage';
 
 const LOGIN_PATH = PageEnum.BASE_LOGIN;
 //auth2登录路由
@@ -35,6 +37,8 @@ export function createPermissionGuard(router: Router) {
 
   // 自定义首页跳转次数
   let homePathJumpCount = 0;
+  let headerSsoLoginTried = false;
+  const { createMessage } = useMessage();
 
   router.beforeEach(async (to, from, next) => {
     if (
@@ -51,6 +55,18 @@ export function createPermissionGuard(router: Router) {
     }
 
     const token = userStore.getToken;
+
+    if (!token && isHeaderSsoEnv() && !headerSsoLoginTried) {
+      headerSsoLoginTried = true;
+      try {
+        await userStore.headerSsoLogin({ goHome: false, mode: 'none' });
+        next({ path: to.path, replace: true, query: to.query });
+      } catch (error) {
+        createMessage.error('SSO 登录失败，请联系管理员');
+        next(false);
+      }
+      return;
+    }
 
     // Whitelist can be directly entered
     if (whitePathList.includes(to.path as PageEnum)) {

@@ -152,6 +152,7 @@ export interface GlobConfig {
   // Upload url (作废)
   uploadUrl?: string;
   openSso?: string;
+  headerSso?: string;
   openQianKun?: string;
   casBaseUrl?: string;
   // onlineview url
@@ -184,6 +185,7 @@ export interface GlobEnvConfig {
   VITE_GLOB_APP_SHORT_NAME: string;
   //是否开启单点登录
   VITE_GLOB_APP_OPEN_SSO: string;
+  VITE_GLOB_HEADER_SSO?: string;
   //是否开启微应用模式
   VITE_GLOB_APP_OPEN_QIANKUN: string;
   //单点服务端地址
