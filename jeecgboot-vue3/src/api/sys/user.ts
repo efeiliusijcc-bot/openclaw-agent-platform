@@ -9,6 +9,7 @@ import { TOKEN_KEY } from '/@/enums/cacheEnum';
 import { router } from '/@/router';
 import { PageEnum } from '/@/enums/pageEnum';
 import { ExceptionEnum } from "@/enums/exceptionEnum";
+import { isHeaderSsoEnv, redirectToHeaderSsoStart } from '/@/hooks/web/useHeaderSso';
 
 const { createErrorModal } = useMessage();
 enum Api {
@@ -101,6 +102,10 @@ export function getUserInfo() {
       const userStore = useUserStoreWithOut();
       userStore.setToken('');
       setAuthCache(TOKEN_KEY, null);
+      if (isHeaderSsoEnv()) {
+        redirectToHeaderSsoStart(window.location.href);
+        return;
+      }
       router.push({
         path: PageEnum.BASE_LOGIN,
         query: {

@@ -20,6 +20,7 @@ import { JDragConfigEnum } from '/@/enums/jeecgEnum';
 import { useSso } from '/@/hooks/web/useSso';
 import { isOAuth2AppEnv } from "/@/views/sys/login/useLogin";
 import { getUrlParam } from "@/utils";
+import { isHeaderSsoEnv, redirectToHeaderSsoSignOut } from '/@/hooks/web/useHeaderSso';
 interface dictType {
   [key: string]: any;
 }
@@ -313,6 +314,11 @@ export const useUserStore = defineStore({
       }, 1e3);
       // 代码逻辑说明: 退出登录后清除拖拽模块的接口前缀
       localStorage.removeItem(JDragConfigEnum.DRAG_BASE_URL);
+
+      if (isHeaderSsoEnv()) {
+        redirectToHeaderSsoSignOut();
+        return;
+      }
 
       //如果开启单点登录,则跳转到单点统一登录中心
       const openSso = useGlobSetting().openSso;

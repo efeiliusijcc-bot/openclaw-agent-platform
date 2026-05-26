@@ -13,7 +13,7 @@ import {isOAuth2AppEnv, isOAuth2DingAppEnv} from '/@/views/sys/login/useLogin';
 import { OAUTH2_THIRD_LOGIN_TENANT_ID } from "/@/enums/cacheEnum";
 import { setAuthCache } from "/@/utils/auth";
 import { PAGE_NOT_FOUND_NAME_404 } from '/@/router/constant';
-import { isHeaderSsoEnv } from '/@/hooks/web/useHeaderSso';
+import { isHeaderSsoEnv, redirectToHeaderSsoStart } from '/@/hooks/web/useHeaderSso';
 import { useMessage } from '/@/hooks/web/useMessage';
 
 const LOGIN_PATH = PageEnum.BASE_LOGIN;
@@ -27,6 +27,7 @@ const SYS_FILES_PATH = PageEnum.SYS_FILES_PATH;
 const TOKEN_LOGIN = PageEnum.TOKEN_LOGIN;
 
 const ROOT_PATH = RootRoute.path;
+const USER_SETTING_PATH = '/system/usersetting';
 
 // 代码逻辑说明: [VUEN-2472]分享免登录------------
 const whitePathList: PageEnum[] = [LOGIN_PATH, OAUTH2_LOGIN_PAGE_PATH,SYS_FILES_PATH, TOKEN_LOGIN ];
@@ -37,10 +38,10 @@ export function createPermissionGuard(router: Router) {
 
   // 自定义首页跳转次数
   let homePathJumpCount = 0;
-  let headerSsoLoginTried = false;
   const { createMessage } = useMessage();
 
   router.beforeEach(async (to, from, next) => {
+    const headerSsoEnv = isHeaderSsoEnv();
     if (
       // 【#6861】跳转到自定义首页的逻辑，只跳转一次即可
       homePathJumpCount < 1 &&
@@ -56,13 +57,19 @@ export function createPermissionGuard(router: Router) {
 
     const token = userStore.getToken;
 
-    if (!token && isHeaderSsoEnv() && !headerSsoLoginTried) {
-      headerSsoLoginTried = true;
+    if (headerSsoEnv && to.path === USER_SETTING_PATH) {
+      createMessage.warning('SSO 用户账号由 Keycloak 管理');
+      next({ path: PageEnum.BASE_HOME, replace: true });
+      return;
+    }
+
+    if (!token && headerSsoEnv) {
       try {
+        const targetPath = to.path === LOGIN_PATH ? ((to.query?.redirect as string) || PageEnum.BASE_HOME) : to.path;
         await userStore.headerSsoLogin({ goHome: false, mode: 'none' });
-        next({ path: to.path, replace: true, query: to.query });
+        next({ path: targetPath, replace: true, query: to.path === LOGIN_PATH ? {} : to.query });
       } catch (error) {
-        createMessage.error('SSO 登录失败，请联系管理员');
+        redirectToHeaderSsoStart(window.location.href);
         next(false);
       }
       return;

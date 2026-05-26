@@ -13,8 +13,8 @@
       <Menu @click="handleMenuClick">
         <MenuItem itemKey="doc" :text="t('layout.header.dropdownItemDoc')" icon="ion:document-text-outline" v-if="getShowDoc" />
         <MenuDivider v-if="getShowDoc" />
-        <MenuItem itemKey="account" :text="t('layout.header.dropdownItemSwitchAccount')" icon="ant-design:setting-outlined" />
-        <MenuItem itemKey="password" :text="t('layout.header.dropdownItemSwitchPassword')" icon="ant-design:edit-outlined" />
+        <MenuItem v-if="!isHeaderSso" itemKey="account" :text="t('layout.header.dropdownItemSwitchAccount')" icon="ant-design:setting-outlined" />
+        <MenuItem v-if="!isHeaderSso" itemKey="password" :text="t('layout.header.dropdownItemSwitchPassword')" icon="ant-design:edit-outlined" />
         <MenuItem itemKey="depart" :text="t('layout.header.dropdownItemSwitchDepart')" icon="ant-design:cluster-outlined" />
         <MenuItem itemKey="cache" :text="t('layout.header.dropdownItemRefreshCache')" icon="ion:sync-outline" />
         <!-- <MenuItem
@@ -58,6 +58,7 @@
   import { getFileAccessHttpUrl } from '/@/utils/common/compUtils';
   import { getRefPromise } from '/@/utils/index';
   import { refreshDragCache } from "@/api/common/api";
+  import { isHeaderSsoEnv } from '/@/hooks/web/useHeaderSso';
 
   type MenuEvent = 'logout' | 'doc' | 'lock' | 'cache' | 'depart' | 'defaultHomePage' | 'password' | 'account';
   const { createMessage } = useMessage();
@@ -84,6 +85,7 @@
       const passwordVisible = ref(false);
       const lockActionVisible = ref(false);
       const lockActionRef = ref(null);
+      const isHeaderSso = computed(() => isHeaderSsoEnv());
 
       const getUserInfo = computed(() => {
         const { realname = '', avatar, desc } = userStore.getUserInfo || {};
@@ -165,9 +167,17 @@
             updateCurrentDepart();
             break;
           case 'password':
+            if (isHeaderSso.value) {
+              createMessage.warning('SSO 用户密码由 Keycloak 管理');
+              break;
+            }
             updatePassword();
             break;
           case 'account':
+            if (isHeaderSso.value) {
+              createMessage.warning('SSO 用户账号由 Keycloak 管理');
+              break;
+            }
             // 代码逻辑说明: 进入用户设置页面------------
             go(`/system/usersetting`);
             break;
@@ -183,6 +193,7 @@
         getShowDoc,
         register,
         getUseLockPage,
+        isHeaderSso,
         loginSelectRef,
         updatePasswordRef,
         passwordVisible,
