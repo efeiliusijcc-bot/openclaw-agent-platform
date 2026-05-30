@@ -10,8 +10,10 @@ import org.jeecg.modules.openclaw.constant.OpenclawConstants;
 import org.jeecg.modules.openclaw.dto.OpenclawAgentRunTestDTO;
 import org.jeecg.modules.openclaw.entity.OpenclawAgent;
 import org.jeecg.modules.openclaw.entity.OpenclawAgentRun;
+import org.jeecg.modules.openclaw.entity.OpenclawGatewayNode;
 import org.jeecg.modules.openclaw.entity.OpenclawUserQuota;
 import org.jeecg.modules.openclaw.mapper.OpenclawAgentMapper;
+import org.jeecg.modules.openclaw.mapper.OpenclawGatewayNodeMapper;
 import org.jeecg.modules.openclaw.mapper.OpenclawAgentRunMapper;
 import org.jeecg.modules.openclaw.service.IOpenclawAgentRunService;
 import org.jeecg.modules.openclaw.service.IOpenclawAuditLogService;
@@ -22,15 +24,21 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
@@ -43,6 +51,8 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
     @Autowired
     private OpenclawAgentMapper agentMapper;
     @Autowired
+    private OpenclawGatewayNodeMapper gatewayNodeMapper;
+    @Autowired
     private IOpenclawPermissionService permissionService;
     @Autowired
     private IOpenclawUserQuotaService quotaService;
@@ -54,6 +64,12 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
 
     @Value("${openclaw.run.timeout-seconds:${OPENCLAW_RUN_TIMEOUT_SECONDS:600}}")
     private Long runTimeoutSeconds;
+
+    @Value("${openclaw.gateway.base-url:${OPENCLAW_GATEWAY_BASE_URL:${OPENCLAW_GATEWAY_URL:http://172.17.0.1:18089}}}")
+    private String defaultGatewayBaseUrl;
+
+    @Value("${openclaw.gateway.token:${OPENCLAW_GATEWAY_TOKEN:}}")
+    private String gatewayToken;
 
     @Override
     public OpenclawAgentRunResultVO runTest(String agentId, OpenclawAgentRunTestDTO dto) {
@@ -95,6 +111,262 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
             auditLogService.log("agent_run_test", "agent_run", run.getId(), toResult(run, agent));
             return toResult(run, agent);
         }
+    }
+
+    @Override
+    public SseEmitter chatStream(String agentId, OpenclawAgentRunTestDTO dto) {
+        LoginUser user = permissionService.currentUser();
+        OpenclawAgent agent = requireAgent(agentId);
+        permissionService.checkOwnerOrAdmin(agent.getUserId());
+        String prompt = normalizePrompt(dto);
+        checkRunQuota(user, agent);
+        String conversationId = normalizeConversationId(dto);
+
+        SseEmitter emitter = new SseEmitter((timeoutSeconds() + 30) * 1000L);
+        CompletableFuture.runAsync(() -> doChatStream(user, agent, prompt, conversationId, emitter));
+        return emitter;
+    }
+
+    private void doChatStream(LoginUser user, OpenclawAgent agent, String prompt, String conversationId, SseEmitter emitter) {
+        OpenclawAgentRun run = null;
+        Date startTime = new Date();
+        String output = "";
+        try {
+            String model = "openclaw/" + agent.getAgentKey();
+            run = createRunningRun(user, agent, prompt, startTime);
+            run.setConversationId(conversationId);
+            run.setRunType(OpenclawConstants.RUN_TYPE_CHAT);
+            run.setStreaming(1);
+            run.setModel(model);
+            save(run);
+
+            sendEvent(emitter, "run_created", streamPayload(run, agent, null, null));
+            output = executeGatewayStream(agent, model, prompt, conversationId, emitter);
+            finishRun(run, startTime, OpenclawConstants.RUN_STATUS_SUCCESS, output, null);
+            safeAuditLog("agent_chat_stream", run, agent);
+            try {
+                sendEvent(emitter, "done", streamPayload(run, agent, null, null));
+            } catch (IOException ignored) {
+                // The run has already succeeded and been persisted; a client-side SSE close must not mark it failed.
+            }
+            emitter.complete();
+        } catch (RunTimeoutException e) {
+            finishFailedStreamRun(run, startTime, OpenclawConstants.RUN_STATUS_TIMEOUT, e.getMessage(), agent, emitter, "timeout");
+        } catch (Exception e) {
+            finishFailedStreamRun(run, startTime, OpenclawConstants.RUN_STATUS_FAILED, e.getMessage(), agent, emitter, "error");
+        }
+    }
+
+    private String executeGatewayStream(OpenclawAgent agent, String model, String prompt, String conversationId, SseEmitter emitter) throws Exception {
+        String baseUrl = gatewayBaseUrl(agent);
+        if (baseUrl.startsWith("ws://") || baseUrl.startsWith("wss://")) {
+            return executeCliStreamCompat(agent, prompt, emitter);
+        }
+
+        JSONObject body = new JSONObject();
+        body.put("model", model);
+        body.put("stream", true);
+        body.put("messages", List.of(new JSONObject()
+            .fluentPut("role", "user")
+            .fluentPut("content", prompt)));
+        body.put("metadata", new JSONObject()
+            .fluentPut("agent_id", agent.getId())
+            .fluentPut("agent_key", agent.getAgentKey())
+            .fluentPut("conversation_id", conversationId));
+
+        HttpRequest.Builder builder = HttpRequest.newBuilder()
+            .uri(URI.create(baseUrl + "/v1/chat/completions"))
+            .timeout(java.time.Duration.ofSeconds(timeoutSeconds() + 5))
+            .header("Content-Type", "application/json")
+            .header("Accept", "text/event-stream")
+            .POST(HttpRequest.BodyPublishers.ofString(body.toJSONString(), StandardCharsets.UTF_8));
+        if (StringUtils.hasText(gatewayToken)) {
+            builder.header("Authorization", "Bearer " + gatewayToken.trim());
+        }
+
+        HttpClient client = HttpClient.newBuilder()
+            .connectTimeout(java.time.Duration.ofSeconds(10))
+            .build();
+        HttpResponse<InputStream> response = client.send(builder.build(), HttpResponse.BodyHandlers.ofInputStream());
+        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            String error = readStream(response.body());
+            throw new JeecgBootException("OpenClaw Gateway returned HTTP " + response.statusCode() + ": " + trim(error, MAX_ERROR_LENGTH));
+        }
+        String output = readGatewayEventStream(response.body(), emitter);
+        if (!StringUtils.hasText(output)) {
+            return executeCliStreamCompat(agent, prompt, emitter);
+        }
+        return output;
+    }
+
+    private String executeCliStreamCompat(OpenclawAgent agent, String prompt, SseEmitter emitter) throws Exception {
+        CliResult result = executeCli(agent.getAgentKey(), prompt);
+        ParsedOutput parsed = parseOutput(result.stdout);
+        boolean timeout = OpenclawConstants.RUN_STATUS_TIMEOUT.equalsIgnoreCase(parsed.status);
+        boolean success = result.exitCode == 0 && ("ok".equalsIgnoreCase(parsed.status) || !StringUtils.hasText(parsed.status));
+        if (timeout) {
+            throw new RunTimeoutException(firstText(parsed.errorMessage, result.stderr, "OpenClaw CLI timed out after " + timeoutSeconds() + " seconds"));
+        }
+        if (!success) {
+            throw new JeecgBootException(firstText(result.stderr, parsed.errorMessage, "OpenClaw CLI exited with code " + result.exitCode));
+        }
+        String output = parsed.outputSummary;
+        if (!StringUtils.hasText(output)) {
+            output = result.stdout;
+        }
+        appendDelta(output, new StringBuilder(), emitter);
+        return output;
+    }
+
+    private String readGatewayEventStream(InputStream inputStream, SseEmitter emitter) throws IOException {
+        StringBuilder output = new StringBuilder();
+        StringBuilder buffer = new StringBuilder();
+        long deadline = System.currentTimeMillis() + timeoutSeconds() * 1000L;
+        byte[] chunk = new byte[4096];
+        try (InputStream in = inputStream) {
+            int read;
+            while ((read = in.read(chunk)) != -1) {
+                if (System.currentTimeMillis() > deadline) {
+                    throw new RunTimeoutException("OpenClaw Gateway stream timed out after " + timeoutSeconds() + " seconds");
+                }
+                buffer.append(new String(chunk, 0, read, StandardCharsets.UTF_8)
+                    .replace("\r\n", "\n")
+                    .replace('\r', '\n'));
+                drainSseBuffer(buffer, output, emitter);
+            }
+            String remaining = buffer.toString().trim();
+            if (StringUtils.hasText(remaining)) {
+                appendDelta(extractDelta(remaining), output, emitter);
+            }
+        }
+        return output.toString();
+    }
+
+    private void drainSseBuffer(StringBuilder buffer, StringBuilder output, SseEmitter emitter) throws IOException {
+        int index;
+        while ((index = buffer.indexOf("\n\n")) >= 0) {
+            String event = buffer.substring(0, index).trim();
+            buffer.delete(0, index + 2);
+            if (!StringUtils.hasText(event)) {
+                continue;
+            }
+            for (String line : event.split("\\R")) {
+                String trimmed = line.trim();
+                if (!trimmed.startsWith("data:")) {
+                    continue;
+                }
+                String data = trimmed.substring(5).trim();
+                if ("[DONE]".equals(data)) {
+                    return;
+                }
+                appendDelta(extractDelta(data), output, emitter);
+            }
+        }
+    }
+
+    private String extractDelta(String data) {
+        if (!StringUtils.hasText(data)) {
+            return null;
+        }
+        try {
+            JSONObject root = JSON.parseObject(data);
+            JSONArray choices = root.getJSONArray("choices");
+            if (choices != null && !choices.isEmpty()) {
+                JSONObject choice = choices.getJSONObject(0);
+                JSONObject delta = choice.getJSONObject("delta");
+                if (delta != null && StringUtils.hasText(delta.getString("content"))) {
+                    return delta.getString("content");
+                }
+                JSONObject message = choice.getJSONObject("message");
+                if (message != null && StringUtils.hasText(message.getString("content"))) {
+                    return message.getString("content");
+                }
+                String text = choice.getString("text");
+                if (StringUtils.hasText(text)) {
+                    return text;
+                }
+            }
+            if (StringUtils.hasText(root.getString("delta"))) {
+                return root.getString("delta");
+            }
+            if (StringUtils.hasText(root.getString("text"))) {
+                return root.getString("text");
+            }
+            if (StringUtils.hasText(root.getString("output_text"))) {
+                return root.getString("output_text");
+            }
+        } catch (Exception ignored) {
+            return data;
+        }
+        return null;
+    }
+
+    private void appendDelta(String delta, StringBuilder output, SseEmitter emitter) throws IOException {
+        if (!StringUtils.hasText(delta)) {
+            return;
+        }
+        output.append(delta);
+        sendEvent(emitter, "delta", new JSONObject().fluentPut("text", delta));
+    }
+
+    private void finishRun(OpenclawAgentRun run, Date startTime, String status, String output, String error) {
+        if (run == null) {
+            return;
+        }
+        Date finishTime = new Date();
+        run.setFinishTime(finishTime);
+        run.setDurationMs(finishTime.getTime() - startTime.getTime());
+        run.setStatus(status);
+        run.setOutputSummary(trim(output, MAX_SUMMARY_LENGTH));
+        run.setErrorMessage(trim(error, MAX_ERROR_LENGTH));
+        updateById(run);
+    }
+
+    private void finishFailedStreamRun(OpenclawAgentRun run, Date startTime, String status, String message, OpenclawAgent agent, SseEmitter emitter, String event) {
+        try {
+            finishRun(run, startTime, status, null, message);
+            JSONObject payload = run == null ? new JSONObject().fluentPut("status", status).fluentPut("errorMessage", trim(message, MAX_ERROR_LENGTH)) : streamPayload(run, agent, null, message);
+            sendEvent(emitter, event, payload);
+            if (run != null && agent != null) {
+                safeAuditLog("agent_chat_stream", run, agent);
+            }
+            emitter.complete();
+        } catch (Exception sendError) {
+            emitter.completeWithError(sendError);
+        }
+    }
+
+    private void safeAuditLog(String action, OpenclawAgentRun run, OpenclawAgent agent) {
+        try {
+            auditLogService.log(action, "agent_run", run.getId(), toResult(run, agent));
+        } catch (Exception ignored) {
+            // SSE runs execute asynchronously; missing request/security context must not alter persisted run status.
+        }
+    }
+
+    private JSONObject streamPayload(OpenclawAgentRun run, OpenclawAgent agent, String text, String error) {
+        JSONObject payload = new JSONObject();
+        payload.put("runId", run.getId());
+        payload.put("agentId", agent == null ? run.getAgentId() : agent.getId());
+        payload.put("agentKey", agent == null ? null : agent.getAgentKey());
+        payload.put("agentName", run.getAgentName());
+        payload.put("conversationId", run.getConversationId());
+        payload.put("runType", run.getRunType());
+        payload.put("streaming", run.getStreaming());
+        payload.put("model", run.getModel());
+        payload.put("status", run.getStatus());
+        payload.put("inputSummary", run.getInputSummary());
+        payload.put("outputSummary", run.getOutputSummary());
+        payload.put("errorMessage", StringUtils.hasText(error) ? trim(error, MAX_ERROR_LENGTH) : run.getErrorMessage());
+        payload.put("durationMs", run.getDurationMs());
+        if (text != null) {
+            payload.put("text", text);
+        }
+        return payload;
+    }
+
+    private void sendEvent(SseEmitter emitter, String event, Object data) throws IOException {
+        emitter.send(SseEmitter.event().name(event).data(data));
     }
 
     private OpenclawAgent requireAgent(String agentId) {
@@ -163,6 +435,9 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
         run.setUsername(user.getUsername());
         run.setAgentId(agent.getId());
         run.setAgentName(agent.getName());
+        run.setRunType(OpenclawConstants.RUN_TYPE_TEST);
+        run.setStreaming(0);
+        run.setModel("openclaw/" + agent.getAgentKey());
         run.setStatus(OpenclawConstants.RUN_STATUS_RUNNING);
         run.setInputSummary(trim(prompt, MAX_SUMMARY_LENGTH));
         run.setStartTime(startTime);
@@ -202,6 +477,41 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
     private long timeoutSeconds() {
         long value = runTimeoutSeconds == null ? 600L : runTimeoutSeconds;
         return Math.max(1L, Math.min(value, 3600L));
+    }
+
+    private String normalizeConversationId(OpenclawAgentRunTestDTO dto) {
+        String value = dto == null ? null : dto.getConversationId();
+        if (!StringUtils.hasText(value)) {
+            return UUID.randomUUID().toString().replace("-", "");
+        }
+        value = value.trim();
+        if (value.length() > 64) {
+            throw new JeecgBootException("Conversation id is too long, max length is 64");
+        }
+        if (!value.matches("[A-Za-z0-9_-]+")) {
+            throw new JeecgBootException("Conversation id can only contain letters, numbers, underscore and hyphen");
+        }
+        return value;
+    }
+
+    private String gatewayBaseUrl(OpenclawAgent agent) {
+        String baseUrl = null;
+        if (StringUtils.hasText(agent.getGatewayId())) {
+            OpenclawGatewayNode node = gatewayNodeMapper.selectById(agent.getGatewayId());
+            if (node != null && Integer.valueOf(OpenclawConstants.DEL_FLAG_NORMAL).equals(node.getDelFlag())) {
+                baseUrl = node.getBaseUrl();
+            }
+        }
+        if (!StringUtils.hasText(baseUrl)) {
+            baseUrl = defaultGatewayBaseUrl;
+        }
+        if (!StringUtils.hasText(baseUrl)) {
+            throw new JeecgBootException("OpenClaw Gateway base URL is empty");
+        }
+        while (baseUrl.endsWith("/")) {
+            baseUrl = baseUrl.substring(0, baseUrl.length() - 1);
+        }
+        return baseUrl;
     }
 
     private String readStream(InputStream inputStream) {
@@ -268,6 +578,10 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
         vo.setAgentId(agent.getId());
         vo.setAgentKey(agent.getAgentKey());
         vo.setAgentName(agent.getName());
+        vo.setConversationId(run.getConversationId());
+        vo.setRunType(run.getRunType());
+        vo.setStreaming(run.getStreaming());
+        vo.setModel(run.getModel());
         vo.setStatus(run.getStatus());
         vo.setInputSummary(run.getInputSummary());
         vo.setOutputSummary(run.getOutputSummary());

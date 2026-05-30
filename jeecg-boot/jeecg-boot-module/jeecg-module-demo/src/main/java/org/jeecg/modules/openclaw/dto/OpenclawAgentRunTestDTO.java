@@ -5,4 +5,5 @@ import lombok.Data;
 @Data
 public class OpenclawAgentRunTestDTO {
     private String prompt;
+    private String conversationId;
 }

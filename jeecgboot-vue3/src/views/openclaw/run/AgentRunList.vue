@@ -12,6 +12,10 @@
     <a-modal v-model:open="detailVisible" title="运行详情" :footer="null" width="860px" destroyOnClose>
       <a-descriptions v-if="detailRecord" bordered :column="1" size="small">
         <a-descriptions-item label="Agent">{{ detailRecord.agentName }}</a-descriptions-item>
+        <a-descriptions-item label="Run Type">{{ detailRecord.runType || '-' }}</a-descriptions-item>
+        <a-descriptions-item label="Conversation ID">{{ detailRecord.conversationId || '-' }}</a-descriptions-item>
+        <a-descriptions-item label="Model">{{ detailRecord.model || '-' }}</a-descriptions-item>
+        <a-descriptions-item label="Streaming">{{ detailRecord.streaming === 1 ? '是' : '否' }}</a-descriptions-item>
         <a-descriptions-item label="Status">
           <a-tag :color="statusColor(detailRecord.status)">{{ detailRecord.status || '-' }}</a-tag>
         </a-descriptions-item>
@@ -53,8 +57,11 @@
     bordered: true,
     columns: [
       { title: 'Agent', dataIndex: 'agentName', width: 160 },
+      { title: 'Run Type', dataIndex: 'runType', width: 100 },
+      { title: 'Conversation ID', dataIndex: 'conversationId', width: 180, ellipsis: true },
       { title: 'User ID', dataIndex: 'userId', width: 170 },
       { title: 'Username', dataIndex: 'username', width: 120 },
+      { title: 'Model', dataIndex: 'model', width: 160, ellipsis: true },
       { title: 'Status', dataIndex: 'status', width: 120, slots: { customRender: 'status' } },
       { title: 'Input Summary', dataIndex: 'inputSummary', ellipsis: true },
       { title: 'Output Summary', dataIndex: 'outputSummary', ellipsis: true },

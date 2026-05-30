@@ -62,6 +62,43 @@
     </a-modal>
 
     <a-modal
+      v-model:open="chatVisible"
+      title="实时对话"
+      okText="发送"
+      cancelText="关闭"
+      :confirmLoading="chatLoading"
+      width="820px"
+      destroyOnClose
+      @ok="submitChat"
+    >
+      <a-form layout="vertical">
+        <a-form-item label="Prompt" required>
+          <a-textarea
+            v-model:value="chatPrompt"
+            :rows="4"
+            :maxlength="MAX_PROMPT_LENGTH"
+            show-count
+            placeholder="请输入要发送给 Agent 的内容"
+            :disabled="chatLoading"
+          />
+        </a-form-item>
+      </a-form>
+      <a-descriptions v-if="chatRun" size="small" bordered :column="1" style="margin-bottom: 12px">
+        <a-descriptions-item label="Run ID">{{ chatRun.runId || '-' }}</a-descriptions-item>
+        <a-descriptions-item label="Conversation ID">{{ chatRun.conversationId || '-' }}</a-descriptions-item>
+        <a-descriptions-item label="Status">
+          <a-tag :color="runStatusColor(chatRun.status)">{{ chatRun.status || 'running' }}</a-tag>
+        </a-descriptions-item>
+        <a-descriptions-item label="Duration (ms)">{{ chatRun.durationMs ?? '-' }}</a-descriptions-item>
+      </a-descriptions>
+      <div class="chat-output-wrap">
+        <div class="chat-output-title">流式输出</div>
+        <pre class="run-output">{{ chatOutput || (chatLoading ? '等待 Agent 响应...' : '暂无输出') }}</pre>
+      </div>
+      <a-alert v-if="chatError" type="error" show-icon :message="chatError" style="margin-top: 12px" />
+    </a-modal>
+
+    <a-modal
       v-model:open="runVisible"
       title="运行测试"
       okText="运行"
@@ -114,6 +151,7 @@
     listAgents,
     listSkills,
     runAgentTest,
+    streamAgentChat,
     unbindSkill,
   } from '../api';
   import { commonTimeColumns, keywordSearch } from '../common';
@@ -131,6 +169,12 @@
   const runLoading = ref(false);
   const runPrompt = ref('');
   const runResult = ref<any>();
+  const chatVisible = ref(false);
+  const chatLoading = ref(false);
+  const chatPrompt = ref('');
+  const chatOutput = ref('');
+  const chatError = ref('');
+  const chatRun = ref<any>();
   const form = reactive<any>({});
 
   const bindingColumns = [
@@ -197,6 +241,7 @@
     return [
       { label: '编辑', auth: 'openclaw:agent:edit', onClick: () => openEdit(record) },
       { label: '运行测试', onClick: () => openRunTest(record) },
+      { label: '实时对话', onClick: () => openChat(record) },
       { label: '绑定 Skill', auth: 'openclaw:agent:bindSkill', onClick: () => openBind(record) },
       { label: '运行记录', onClick: () => router.push({ path: '/openclaw/run', query: { agentId: record.id } }) },
       {
@@ -228,6 +273,15 @@
     runVisible.value = true;
   }
 
+  function openChat(record) {
+    currentAgent.value = record;
+    chatPrompt.value = '';
+    chatOutput.value = '';
+    chatError.value = '';
+    chatRun.value = undefined;
+    chatVisible.value = true;
+  }
+
   async function submitRunTest() {
     const prompt = (runPrompt.value || '').trim();
     if (!prompt) {
@@ -251,6 +305,93 @@
       }
     } finally {
       runLoading.value = false;
+    }
+  }
+
+  async function submitChat() {
+    const prompt = (chatPrompt.value || '').trim();
+    if (!prompt) {
+      createMessage.warning('Prompt 不能为空');
+      return;
+    }
+    if (prompt.length > MAX_PROMPT_LENGTH) {
+      createMessage.warning(`Prompt 长度不能超过 ${MAX_PROMPT_LENGTH}`);
+      return;
+    }
+    chatLoading.value = true;
+    chatOutput.value = '';
+    chatError.value = '';
+    try {
+      const stream = await streamAgentChat(currentAgent.value.id, {
+        prompt,
+        conversationId: chatRun.value?.conversationId,
+      });
+      await readChatStream(stream);
+    } catch (error: any) {
+      if (chatRun.value?.status === 'success') {
+        chatError.value = '';
+        return;
+      }
+      chatError.value = error?.message || '实时对话请求失败';
+      createMessage.error(chatError.value);
+    } finally {
+      chatLoading.value = false;
+    }
+  }
+
+  async function readChatStream(stream: ReadableStream<Uint8Array>) {
+    const reader = stream.getReader();
+    const decoder = new TextDecoder('UTF-8');
+    let buffer = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      buffer += decoder.decode(value, { stream: true });
+      const events = buffer.split('\n\n');
+      buffer = events.pop() || '';
+      events.forEach(handleChatEvent);
+    }
+    if (buffer.trim()) {
+      handleChatEvent(buffer);
+    }
+  }
+
+  function handleChatEvent(raw: string) {
+    let eventName = 'message';
+    const dataLines: string[] = [];
+    raw.split(/\r?\n/).forEach((line) => {
+      if (line.startsWith('event:')) {
+        eventName = line.slice(6).trim();
+      }
+      if (line.startsWith('data:')) {
+        dataLines.push(line.slice(5).trim());
+      }
+    });
+    if (!dataLines.length) {
+      return;
+    }
+    try {
+      const payload = JSON.parse(dataLines.join('\n'));
+      if (eventName === 'run_created') {
+        chatRun.value = payload;
+      } else if (eventName === 'delta') {
+        chatOutput.value += payload.text || '';
+      } else if (eventName === 'done') {
+        chatRun.value = payload;
+        chatError.value = '';
+        if (payload.outputSummary) {
+          chatOutput.value = payload.outputSummary;
+        }
+        createMessage.success('对话完成');
+      } else if (eventName === 'error' || eventName === 'timeout') {
+        chatRun.value = payload;
+        chatError.value = payload.errorMessage || '对话失败';
+        createMessage.error(chatError.value);
+      }
+    } catch (error) {
+      console.warn('Failed to parse chat stream event', error, raw);
     }
   }
 
@@ -324,5 +465,17 @@
 
   .run-error {
     color: #cf1322;
+  }
+
+  .chat-output-wrap {
+    border: 1px solid #d9d9d9;
+    border-radius: 4px;
+    padding: 12px;
+    background: #fafafa;
+  }
+
+  .chat-output-title {
+    margin-bottom: 8px;
+    font-weight: 500;
   }
 </style>

@@ -24,6 +24,10 @@ public class OpenclawAgentRun extends JeecgEntity implements Serializable {
     private String username;
     private String agentId;
     private String agentName;
+    private String conversationId;
+    private String runType;
+    private Integer streaming;
+    private String model;
     private String status;
     private String inputSummary;
     private String outputSummary;

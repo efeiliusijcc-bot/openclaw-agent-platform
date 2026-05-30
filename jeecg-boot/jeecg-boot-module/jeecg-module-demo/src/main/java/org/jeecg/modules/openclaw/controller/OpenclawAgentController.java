@@ -21,7 +21,9 @@ import org.jeecg.modules.openclaw.service.IOpenclawAgentSkillService;
 import org.jeecg.modules.openclaw.service.IOpenclawPermissionService;
 import org.jeecg.modules.openclaw.vo.OpenclawAgentRunResultVO;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 @Tag(name = "OpenClaw Agent")
 @RestController
@@ -111,5 +113,12 @@ public class OpenclawAgentController {
     @RequiresPermissions("openclaw:agent:list")
     public Result<OpenclawAgentRunResultVO> runTest(@PathVariable String id, @RequestBody OpenclawAgentRunTestDTO dto) {
         return Result.OK(agentRunService.runTest(id, dto));
+    }
+
+    @PostMapping(value = "/{id}/chat/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    @AutoLog(value = "OpenClaw Agent chat stream")
+    @RequiresPermissions("openclaw:agent:list")
+    public SseEmitter chatStream(@PathVariable String id, @RequestBody OpenclawAgentRunTestDTO dto) {
+        return agentRunService.chatStream(id, dto);
     }
 }

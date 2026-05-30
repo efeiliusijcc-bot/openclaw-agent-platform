@@ -26,6 +26,8 @@ public final class OpenclawConstants {
     public static final String RUN_STATUS_SUCCESS = "success";
     public static final String RUN_STATUS_FAILED = "failed";
     public static final String RUN_STATUS_TIMEOUT = "timeout";
+    public static final String RUN_TYPE_TEST = "test";
+    public static final String RUN_TYPE_CHAT = "chat";
 
     public static final int DEL_FLAG_NORMAL = 0;
     public static final int DEL_FLAG_DELETED = 1;
