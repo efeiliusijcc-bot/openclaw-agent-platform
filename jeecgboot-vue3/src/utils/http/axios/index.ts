@@ -19,9 +19,33 @@ import { useI18n } from '/@/hooks/web/useI18n';
 import { joinTimestamp, formatRequestDate } from './helper';
 import { useUserStoreWithOut } from '/@/store/modules/user';
 import { cloneDeep } from "lodash-es";
+import { isHeaderSsoEnv, redirectToHeaderSsoStart } from '/@/hooks/web/useHeaderSso';
 const globSetting = useGlobSetting();
 const urlPrefix = globSetting.urlPrefix;
 const { createMessage, createErrorModal } = useMessage();
+
+function redirectHeaderSsoWhenAuthProxyResponse(data: any, response?: AxiosResponse<any>) {
+  if (!isHeaderSsoEnv()) {
+    return false;
+  }
+  const responseUrl = response?.request?.responseURL || '';
+  const contentType = response?.headers?.['content-type'] || '';
+  const text = typeof data === 'string' ? data : '';
+  const redirectedToAuth =
+    responseUrl.includes('/oauth2/start') ||
+    responseUrl.includes('/oauth2/callback') ||
+    responseUrl.includes('/realms/company/protocol/openid-connect/auth') ||
+    text.includes('/oauth2/start') ||
+    text.includes('/realms/company/protocol/openid-connect/auth');
+  if (!redirectedToAuth && !contentType.includes('text/html')) {
+    return false;
+  }
+  const userStore = useUserStoreWithOut();
+  userStore.setToken('');
+  userStore.setSessionTimeout(false);
+  redirectToHeaderSsoStart(window.location.href);
+  return true;
+}
 
 /**
  * @description: 数据处理，方便区分多种处理方式
@@ -45,6 +69,9 @@ const transform: AxiosTransform = {
     // 错误的时候返回
 
     const { data } = res;
+    if (redirectHeaderSsoWhenAuthProxyResponse(data, res)) {
+      throw new Error('SSO session expired');
+    }
     if (!data) {
       // return '[HTTP] Request has no return value';
       throw new Error(t('sys.api.apiRequestFailed'));
@@ -223,6 +250,13 @@ const transform: AxiosTransform = {
     errorLogStore.addAjaxErrorInfo(error);
     const { response, code, message, config } = error || {};
     const errorMessageMode = config?.requestOptions?.errorMessageMode || 'none';
+    if (isHeaderSsoEnv() && response && [401, 403].includes(response.status)) {
+      const userStore = useUserStoreWithOut();
+      userStore.setToken('');
+      userStore.setSessionTimeout(false);
+      redirectToHeaderSsoStart(window.location.href);
+      return Promise.reject(error);
+    }
     //scott 20211022 token失效提示信息
     //const msg: string = response?.data?.error?.message ?? '';
     const msg: string = response?.data?.message ?? '';
