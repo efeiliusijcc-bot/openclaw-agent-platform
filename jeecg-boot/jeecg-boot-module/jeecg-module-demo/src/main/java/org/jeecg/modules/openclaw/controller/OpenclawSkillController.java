@@ -2,7 +2,6 @@ package org.jeecg.modules.openclaw.controller;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
-import com.baomidou.mybatisplus.core.toolkit.IdWorker;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
@@ -11,18 +10,24 @@ import org.apache.shiro.authz.annotation.RequiresPermissions;
 import org.jeecg.common.api.vo.Result;
 import org.jeecg.common.exception.JeecgBootException;
 import org.jeecg.common.system.query.QueryGenerator;
-import org.jeecg.common.system.vo.LoginUser;
 import org.jeecg.modules.openclaw.constant.OpenclawConstants;
 import org.jeecg.modules.openclaw.entity.OpenclawSkill;
 import org.jeecg.modules.openclaw.service.IOpenclawPermissionService;
 import org.jeecg.modules.openclaw.service.IOpenclawSkillService;
 import org.jeecg.modules.openclaw.vo.OpenclawSkillImportResultVO;
+import org.jeecg.modules.openclaw.vo.OpenclawSkillQualityCheckVO;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.util.StringUtils;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestMethod;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
-
-import java.util.Locale;
 
 @Tag(name = "OpenClaw Skill")
 @RestController
@@ -52,24 +57,11 @@ public class OpenclawSkillController {
     @PostMapping("/add")
     @RequiresPermissions("openclaw:skill:add")
     public Result<?> add(@RequestBody OpenclawSkill skill) {
-        LoginUser user = permissionService.currentUser();
         if (!StringUtils.hasText(skill.getName())) {
-            throw new JeecgBootException("Skill 名称不能为空");
+            throw new JeecgBootException("Skill name is required");
         }
-        String version = normalizeVersion(skill.getVersion());
-        String slug = normalizeSlug(skill.getName()) + "-" + IdWorker.getIdStr();
-        skill.setOwnerUserId(user.getId());
-        skill.setOwnerUsername(user.getUsername());
-        skill.setSlug(slug);
-        skill.setVersion(version);
-        skill.setPath(OpenclawConstants.SKILL_ROOT + "/" + user.getId() + "/" + slug + "/" + version);
-        skill.setScope("private");
-        skill.setStatus("draft");
-        skill.setChecksum(null);
-        skill.setFileSize(0L);
-        skill.setDelFlag(OpenclawConstants.DEL_FLAG_NORMAL);
-        skillService.save(skill);
-        return Result.OK("新增成功");
+        skillService.createDraftSkill(skill);
+        return Result.OK("Created successfully");
     }
 
     @RequestMapping(value = "/edit", method = {RequestMethod.PUT, RequestMethod.POST})
@@ -77,7 +69,7 @@ public class OpenclawSkillController {
     public Result<?> edit(@RequestBody OpenclawSkill request) {
         OpenclawSkill skill = skillService.getById(request.getId());
         if (skill == null || Integer.valueOf(OpenclawConstants.DEL_FLAG_DELETED).equals(skill.getDelFlag())) {
-            throw new JeecgBootException("Skill 不存在");
+            throw new JeecgBootException("Skill does not exist");
         }
         permissionService.checkOwnerOrAdmin(skill.getOwnerUserId());
         skill.setName(request.getName());
@@ -88,7 +80,7 @@ public class OpenclawSkillController {
             skill.setStatus(request.getStatus());
         }
         skillService.updateById(skill);
-        return Result.OK("更新成功");
+        return Result.OK("Updated successfully");
     }
 
     @PostMapping("/import")
@@ -103,18 +95,24 @@ public class OpenclawSkillController {
         skillService.exportSkill(id, response);
     }
 
+    @GetMapping("/{id}/quality-check")
+    @RequiresPermissions("openclaw:skill:export")
+    public Result<OpenclawSkillQualityCheckVO> qualityCheck(@PathVariable String id) {
+        return Result.OK(skillService.checkSkillQuality(id));
+    }
+
     @DeleteMapping("/delete")
     @RequiresPermissions("openclaw:skill:delete")
     public Result<?> delete(@RequestParam String id) {
         skillService.logicDeleteSkill(id);
-        return Result.OK("删除成功");
+        return Result.OK("Deleted successfully");
     }
 
     @PostMapping("/disable")
     @RequiresPermissions("openclaw:skill:disable")
     public Result<?> disable(@RequestParam String id) {
         skillService.disableSkill(id);
-        return Result.OK("禁用成功");
+        return Result.OK("Disabled successfully");
     }
 
     @GetMapping("/queryById")
@@ -125,19 +123,5 @@ public class OpenclawSkillController {
             permissionService.checkOwnerOrAdmin(skill.getOwnerUserId());
         }
         return Result.OK(skill);
-    }
-
-    private String normalizeSlug(String raw) {
-        String slug = raw == null ? "" : raw.trim().toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9._-]+", "-");
-        slug = slug.replaceAll("^-+", "").replaceAll("-+$", "");
-        return StringUtils.hasText(slug) ? slug : "skill";
-    }
-
-    private String normalizeVersion(String raw) {
-        String version = StringUtils.hasText(raw) ? raw.trim() : "1.0.0";
-        if (!version.matches("[0-9A-Za-z._-]{1,50}")) {
-            throw new JeecgBootException("Skill 版本号格式非法");
-        }
-        return version;
     }
 }
