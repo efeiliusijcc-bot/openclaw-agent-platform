@@ -31,6 +31,9 @@ public class OpenclawAgentRun extends JeecgEntity implements Serializable {
     private String status;
     private String inputSummary;
     private String outputSummary;
+    private String fullOutputPath;
+    private String logPath;
+    private String errorType;
     private String errorMessage;
     @JsonFormat(timezone = "GMT+8", pattern = "yyyy-MM-dd HH:mm:ss")
     @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss")

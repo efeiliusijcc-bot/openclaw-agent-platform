@@ -39,6 +39,7 @@ import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.ArrayList;
@@ -98,6 +99,7 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
             run.setFinishTime(finishTime);
             run.setDurationMs(finishTime.getTime() - startTime.getTime());
             applyCliResult(run, result);
+            persistRunArtifacts(run, agent, result, run.getOutputSummary(), null);
             updateById(run);
             auditLogService.log("agent_run_test", "agent_run", run.getId(), toResult(run, agent));
             return toResult(run, agent);
@@ -106,7 +108,9 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
             run.setFinishTime(finishTime);
             run.setDurationMs(finishTime.getTime() - startTime.getTime());
             run.setStatus(OpenclawConstants.RUN_STATUS_TIMEOUT);
+            run.setErrorType(OpenclawConstants.RUN_ERROR_GATEWAY_TIMEOUT);
             run.setErrorMessage(trim(e.getMessage(), MAX_ERROR_LENGTH));
+            persistRunArtifacts(run, agent, null, null, e);
             updateById(run);
             auditLogService.log("agent_run_test", "agent_run", run.getId(), toResult(run, agent));
             return toResult(run, agent);
@@ -115,7 +119,9 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
             run.setFinishTime(finishTime);
             run.setDurationMs(finishTime.getTime() - startTime.getTime());
             run.setStatus(OpenclawConstants.RUN_STATUS_FAILED);
+            run.setErrorType(classifyError(e));
             run.setErrorMessage(trim(e.getMessage(), MAX_ERROR_LENGTH));
+            persistRunArtifacts(run, agent, null, null, e);
             updateById(run);
             auditLogService.log("agent_run_test", "agent_run", run.getId(), toResult(run, agent));
             return toResult(run, agent);
@@ -153,6 +159,8 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
             sendEvent(emitter, "run_created", streamPayload(run, agent, null, null));
             output = executeGatewayStream(agent, model, prompt, conversationId, emitter);
             finishRun(run, startTime, OpenclawConstants.RUN_STATUS_SUCCESS, output, null);
+            persistRunArtifacts(run, agent, null, output, null);
+            updateById(run);
             safeAuditLog("agent_chat_stream", run, agent);
             try {
                 sendEvent(emitter, "done", streamPayload(run, agent, null, null));
@@ -329,12 +337,18 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
         run.setStatus(status);
         run.setOutputSummary(trim(output, MAX_SUMMARY_LENGTH));
         run.setErrorMessage(trim(error, MAX_ERROR_LENGTH));
+        run.setErrorType(StringUtils.hasText(error) ? OpenclawConstants.RUN_ERROR_OPENCLAW_ERROR : null);
         updateById(run);
     }
 
     private void finishFailedStreamRun(OpenclawAgentRun run, Date startTime, String status, String message, OpenclawAgent agent, SseEmitter emitter, String event) {
         try {
             finishRun(run, startTime, status, null, message);
+            if (run != null && agent != null) {
+                run.setErrorType(OpenclawConstants.RUN_STATUS_TIMEOUT.equals(status) ? OpenclawConstants.RUN_ERROR_GATEWAY_TIMEOUT : OpenclawConstants.RUN_ERROR_OPENCLAW_ERROR);
+                persistRunArtifacts(run, agent, null, null, new JeecgBootException(message));
+                updateById(run);
+            }
             JSONObject payload = run == null ? new JSONObject().fluentPut("status", status).fluentPut("errorMessage", trim(message, MAX_ERROR_LENGTH)) : streamPayload(run, agent, null, message);
             sendEvent(emitter, event, payload);
             if (run != null && agent != null) {
@@ -367,6 +381,9 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
         payload.put("status", run.getStatus());
         payload.put("inputSummary", run.getInputSummary());
         payload.put("outputSummary", run.getOutputSummary());
+        payload.put("fullOutputPath", run.getFullOutputPath());
+        payload.put("logPath", run.getLogPath());
+        payload.put("errorType", run.getErrorType());
         payload.put("errorMessage", StringUtils.hasText(error) ? trim(error, MAX_ERROR_LENGTH) : run.getErrorMessage());
         payload.put("durationMs", run.getDurationMs());
         if (text != null) {
@@ -600,8 +617,10 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
         boolean success = result.exitCode == 0 && ("ok".equalsIgnoreCase(parsed.status) || !StringUtils.hasText(parsed.status));
         if (timeout) {
             run.setStatus(OpenclawConstants.RUN_STATUS_TIMEOUT);
+            run.setErrorType(OpenclawConstants.RUN_ERROR_GATEWAY_TIMEOUT);
         } else {
             run.setStatus(success ? OpenclawConstants.RUN_STATUS_SUCCESS : OpenclawConstants.RUN_STATUS_FAILED);
+            run.setErrorType(success ? null : OpenclawConstants.RUN_ERROR_CLI_FALLBACK_FAILED);
         }
         run.setOutputSummary(trim(parsed.outputSummary, MAX_SUMMARY_LENGTH));
         if (!success || timeout) {
@@ -657,9 +676,87 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
         vo.setStatus(run.getStatus());
         vo.setInputSummary(run.getInputSummary());
         vo.setOutputSummary(run.getOutputSummary());
+        vo.setFullOutputPath(run.getFullOutputPath());
+        vo.setLogPath(run.getLogPath());
+        vo.setErrorType(run.getErrorType());
         vo.setErrorMessage(run.getErrorMessage());
         vo.setDurationMs(run.getDurationMs());
         return vo;
+    }
+
+    private void persistRunArtifacts(OpenclawAgentRun run, OpenclawAgent agent, CliResult cliResult, String output, Exception error) {
+        if (run == null || agent == null || !StringUtils.hasText(run.getId())) {
+            return;
+        }
+        try {
+            OpenclawWorkspace workspace = workspaceMapper.selectById(agent.getWorkspaceId());
+            if (workspace == null || !StringUtils.hasText(workspace.getPath())) {
+                return;
+            }
+            Path workspacePath = normalizePath(workspace.getPath(), "Agent workspace path is invalid");
+            Path rootPath = normalizePath(OpenclawConstants.WORKSPACE_ROOT, "OpenClaw workspace root is invalid");
+            if (!workspacePath.startsWith(rootPath) || Files.isSymbolicLink(workspacePath)) {
+                return;
+            }
+            Path outputDir = workspacePath.resolve("output").normalize();
+            Path logDir = workspacePath.resolve("logs").normalize();
+            if (!outputDir.startsWith(workspacePath) || !logDir.startsWith(workspacePath)) {
+                return;
+            }
+            Files.createDirectories(outputDir);
+            Files.createDirectories(logDir);
+
+            String fullOutput = firstText(output, cliResult == null ? null : cliResult.stdout, "");
+            Path outputFile = outputDir.resolve("run-" + run.getId() + ".txt").normalize();
+            Files.writeString(outputFile, fullOutput, StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+            run.setFullOutputPath(outputFile.toString());
+
+            Path logFile = logDir.resolve("run-" + run.getId() + ".log").normalize();
+            Files.writeString(logFile, runLog(run, agent, cliResult, error), StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+            run.setLogPath(logFile.toString());
+        } catch (Exception artifactError) {
+            String message = firstText(run.getErrorMessage(), "") + "\nArtifact write failed: " + artifactError.getMessage();
+            run.setErrorMessage(trim(message.trim(), MAX_ERROR_LENGTH));
+            if (!StringUtils.hasText(run.getErrorType())) {
+                run.setErrorType(OpenclawConstants.RUN_ERROR_UNKNOWN);
+            }
+        }
+    }
+
+    private String runLog(OpenclawAgentRun run, OpenclawAgent agent, CliResult cliResult, Exception error) {
+        StringBuilder builder = new StringBuilder();
+        builder.append("runId=").append(run.getId()).append('\n');
+        builder.append("agentId=").append(agent.getId()).append('\n');
+        builder.append("agentKey=").append(agent.getAgentKey()).append('\n');
+        builder.append("runType=").append(run.getRunType()).append('\n');
+        builder.append("status=").append(run.getStatus()).append('\n');
+        builder.append("errorType=").append(firstText(run.getErrorType(), "")).append('\n');
+        builder.append("startTime=").append(run.getStartTime()).append('\n');
+        builder.append("finishTime=").append(run.getFinishTime()).append('\n');
+        builder.append("durationMs=").append(run.getDurationMs()).append("\n\n");
+        builder.append("input:\n").append(firstText(run.getInputSummary(), "")).append("\n\n");
+        if (cliResult != null) {
+            builder.append("exitCode=").append(cliResult.exitCode).append("\n\n");
+            builder.append("stdout:\n").append(firstText(cliResult.stdout, "")).append("\n\n");
+            builder.append("stderr:\n").append(firstText(cliResult.stderr, "")).append("\n\n");
+        }
+        if (error != null) {
+            builder.append("error:\n").append(error.getClass().getName()).append(": ").append(firstText(error.getMessage(), "")).append('\n');
+        }
+        return builder.toString();
+    }
+
+    private String classifyError(Exception e) {
+        if (e instanceof RunTimeoutException) {
+            return OpenclawConstants.RUN_ERROR_GATEWAY_TIMEOUT;
+        }
+        if (e instanceof JeecgBootException && StringUtils.hasText(e.getMessage()) && e.getMessage().contains("CLI")) {
+            return OpenclawConstants.RUN_ERROR_CLI_FALLBACK_FAILED;
+        }
+        if (e instanceof JeecgBootException) {
+            return OpenclawConstants.RUN_ERROR_OPENCLAW_ERROR;
+        }
+        return OpenclawConstants.RUN_ERROR_UNKNOWN;
     }
 
     private String firstText(String... values) {

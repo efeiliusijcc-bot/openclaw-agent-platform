@@ -15,6 +15,9 @@ public class OpenclawAgentRunResultVO {
     private String status;
     private String inputSummary;
     private String outputSummary;
+    private String fullOutputPath;
+    private String logPath;
+    private String errorType;
     private String errorMessage;
     private Long durationMs;
 }
