@@ -38,6 +38,7 @@ export const syncGatewayConfig = (id: string) => defHttp.post({ url: `/openclaw/
 export const listAuditLogs = (params) => defHttp.get({ url: '/openclaw/audit/list', params });
 export const listAgentSkills = (params) => defHttp.get({ url: '/openclaw/agentSkill/list', params });
 export const runAgentTest = (id: string, params) => defHttp.post({ url: `/openclaw/agent/${id}/run-test`, params, timeout: 90 * 1000 });
+export const getSystemHealth = () => defHttp.get({ url: '/openclaw/system/health' });
 
 export const streamAgentChat = async (id: string, params) => {
   const response = await fetch(`/jeecg-boot/openclaw/agent/${id}/chat/stream`, {
