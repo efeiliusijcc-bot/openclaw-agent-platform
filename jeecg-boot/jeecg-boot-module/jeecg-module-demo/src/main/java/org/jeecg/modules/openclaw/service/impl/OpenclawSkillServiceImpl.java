@@ -99,7 +99,7 @@ public class OpenclawSkillServiceImpl extends ServiceImpl<OpenclawSkillMapper, O
         skill.setSlug(slug);
         skill.setVersion(version);
         skill.setScope("private");
-        skill.setStatus("draft");
+        skill.setStatus(OpenclawConstants.SKILL_STATUS_DRAFT);
         skill.setDescription(request.getDescription());
         skill.setPath(targetDir.toString());
         skill.setChecksum(sha256Directory(targetDir));

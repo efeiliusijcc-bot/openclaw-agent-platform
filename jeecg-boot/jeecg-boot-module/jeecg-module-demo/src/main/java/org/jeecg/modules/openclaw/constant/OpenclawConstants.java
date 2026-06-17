@@ -19,7 +19,9 @@ public final class OpenclawConstants {
     public static final String WORKSPACE_STATUS_ACTIVE = "active";
     public static final String WORKSPACE_STATUS_DELETED = "deleted";
 
+    public static final String SKILL_STATUS_DRAFT = "draft";
     public static final String SKILL_STATUS_PRIVATE = "private";
+    public static final String SKILL_STATUS_APPROVED = "approved";
     public static final String SKILL_STATUS_DISABLED = "disabled";
 
     public static final String RUN_STATUS_RUNNING = "running";

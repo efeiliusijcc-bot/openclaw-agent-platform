@@ -15,6 +15,9 @@ import org.jeecg.modules.openclaw.service.IOpenclawPermissionService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
+
+import java.util.Objects;
 
 @Service
 public class OpenclawAgentSkillServiceImpl extends ServiceImpl<OpenclawAgentSkillMapper, OpenclawAgentSkill> implements IOpenclawAgentSkillService {
@@ -32,18 +35,10 @@ public class OpenclawAgentSkillServiceImpl extends ServiceImpl<OpenclawAgentSkil
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void bindSkill(String agentId, String skillId) {
-        OpenclawAgent agent = agentMapper.selectById(agentId);
-        if (agent == null || Integer.valueOf(OpenclawConstants.DEL_FLAG_DELETED).equals(agent.getDelFlag())) {
-            throw new JeecgBootException("Agent 不存在");
-        }
-        OpenclawSkill skill = skillMapper.selectById(skillId);
-        if (skill == null || Integer.valueOf(OpenclawConstants.DEL_FLAG_DELETED).equals(skill.getDelFlag())) {
-            throw new JeecgBootException("Skill 不存在");
-        }
+        OpenclawAgent agent = requireAgent(agentId);
+        OpenclawSkill skill = requireBindableSkill(agent, skillId);
         permissionService.checkOwnerOrAdmin(agent.getUserId());
-        if (!permissionService.isAdmin(permissionService.currentUser())) {
-            permissionService.checkOwnerOrAdmin(skill.getOwnerUserId());
-        }
+        checkSkillAccess(agent, skill);
         long currentBindings = lambdaQuery()
             .eq(OpenclawAgentSkill::getAgentId, agentId)
             .eq(OpenclawAgentSkill::getEnabled, 1)
@@ -56,11 +51,16 @@ public class OpenclawAgentSkillServiceImpl extends ServiceImpl<OpenclawAgentSkil
             .eq(OpenclawAgentSkill::getAgentId, agentId)
             .eq(OpenclawAgentSkill::getSkillId, skillId)
             .one();
+        if (binding != null
+            && Integer.valueOf(1).equals(binding.getEnabled())
+            && Integer.valueOf(OpenclawConstants.DEL_FLAG_NORMAL).equals(binding.getDelFlag())) {
+            throw new JeecgBootException("Agent 已绑定该 Skill");
+        }
         if (binding == null) {
             binding = new OpenclawAgentSkill();
-            binding.setAgentId(agentId);
-            binding.setSkillId(skillId);
         }
+        binding.setAgentId(agentId);
+        binding.setSkillId(skillId);
         binding.setEnabled(1);
         binding.setDelFlag(OpenclawConstants.DEL_FLAG_NORMAL);
         saveOrUpdate(binding);
@@ -71,10 +71,7 @@ public class OpenclawAgentSkillServiceImpl extends ServiceImpl<OpenclawAgentSkil
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void unbindSkill(String agentId, String skillId) {
-        OpenclawAgent agent = agentMapper.selectById(agentId);
-        if (agent == null) {
-            throw new JeecgBootException("Agent 不存在");
-        }
+        OpenclawAgent agent = requireAgent(agentId);
         permissionService.checkOwnerOrAdmin(agent.getUserId());
         OpenclawAgentSkill binding = lambdaQuery()
             .eq(OpenclawAgentSkill::getAgentId, agentId)
@@ -109,5 +106,48 @@ public class OpenclawAgentSkillServiceImpl extends ServiceImpl<OpenclawAgentSkil
             .eq(OpenclawAgentSkill::getEnabled, 1)
             .eq(OpenclawAgentSkill::getDelFlag, OpenclawConstants.DEL_FLAG_NORMAL)
             .count());
+    }
+
+    private OpenclawAgent requireAgent(String agentId) {
+        OpenclawAgent agent = agentMapper.selectById(agentId);
+        if (agent == null || Integer.valueOf(OpenclawConstants.DEL_FLAG_DELETED).equals(agent.getDelFlag())) {
+            throw new JeecgBootException("Agent 不存在");
+        }
+        if (OpenclawConstants.AGENT_STATUS_DISABLED.equals(agent.getStatus())) {
+            throw new JeecgBootException("已禁用 Agent 不能绑定或解绑 Skill");
+        }
+        return agent;
+    }
+
+    private OpenclawSkill requireBindableSkill(OpenclawAgent agent, String skillId) {
+        OpenclawSkill skill = skillMapper.selectById(skillId);
+        if (skill == null || Integer.valueOf(OpenclawConstants.DEL_FLAG_DELETED).equals(skill.getDelFlag())) {
+            throw new JeecgBootException("Skill 不存在");
+        }
+        if (OpenclawConstants.SKILL_STATUS_DISABLED.equals(skill.getStatus())) {
+            throw new JeecgBootException("已禁用 Skill 不能绑定");
+        }
+        if (OpenclawConstants.SKILL_STATUS_DRAFT.equals(skill.getStatus())) {
+            throw new JeecgBootException("草稿 Skill 需审核或导入后才能绑定");
+        }
+        if (!OpenclawConstants.SKILL_STATUS_APPROVED.equals(skill.getStatus())
+            && !OpenclawConstants.SKILL_STATUS_PRIVATE.equals(skill.getStatus())) {
+            throw new JeecgBootException("Skill 状态不允许绑定: " + (StringUtils.hasText(skill.getStatus()) ? skill.getStatus() : "empty"));
+        }
+        if (OpenclawConstants.SKILL_STATUS_PRIVATE.equals(skill.getStatus())
+            && !Objects.equals(agent.getUserId(), skill.getOwnerUserId())) {
+            throw new JeecgBootException("私有 Skill 只能绑定到同一用户的 Agent");
+        }
+        return skill;
+    }
+
+    private void checkSkillAccess(OpenclawAgent agent, OpenclawSkill skill) {
+        if (OpenclawConstants.SKILL_STATUS_APPROVED.equals(skill.getStatus())) {
+            return;
+        }
+        if (!Objects.equals(agent.getUserId(), skill.getOwnerUserId())) {
+            throw new JeecgBootException("无权绑定该 Skill");
+        }
+        permissionService.checkOwnerOrAdmin(skill.getOwnerUserId());
     }
 }

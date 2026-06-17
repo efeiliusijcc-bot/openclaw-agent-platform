@@ -55,7 +55,7 @@ public class OpenclawSkillMaterializer {
         OpenclawWorkspace workspace = requireWorkspace(agent);
         workspaceMaterializer.materialize(agent, workspace);
         Path source = requireSkillSource(skill);
-        Path skillsRoot = Paths.get(workspace.getPath()).normalize().resolve("skills").normalize();
+        Path skillsRoot = workspaceMaterializer.safeWorkspacePath(workspace.getPath()).resolve("skills").normalize();
         Path target = skillsRoot.resolve(skill.getSlug()).normalize();
         if (!target.startsWith(skillsRoot)) {
             throw new JeecgBootException("Invalid skill slug path: " + skill.getSlug());
@@ -87,12 +87,13 @@ public class OpenclawSkillMaterializer {
             return;
         }
         OpenclawWorkspace workspace = requireWorkspace(agent);
-        Path skillsRoot = Paths.get(workspace.getPath()).normalize().resolve("skills").normalize();
+        Path skillsRoot = workspaceMaterializer.safeWorkspacePath(workspace.getPath()).resolve("skills").normalize();
         Path target = skillsRoot.resolve(skill.getSlug()).normalize();
         if (!target.startsWith(skillsRoot)) {
             throw new JeecgBootException("Invalid skill slug path: " + skill.getSlug());
         }
-        deleteDirectory(target);
+        deleteDirectoryStrict(target);
+        workspaceMaterializer.materialize(agent, workspace);
     }
 
     private OpenclawWorkspace requireWorkspace(OpenclawAgent agent) {
@@ -107,7 +108,16 @@ public class OpenclawSkillMaterializer {
         if (skill == null || !StringUtils.hasText(skill.getPath())) {
             throw new JeecgBootException("Skill source path is empty");
         }
-        Path source = Paths.get(skill.getPath()).normalize();
+        Path source = Paths.get(skill.getPath()).toAbsolutePath().normalize();
+        Path skillRoot = Paths.get(OpenclawConstants.SKILL_ROOT).toAbsolutePath().normalize();
+        if (!source.startsWith(skillRoot)) {
+            throw new JeecgBootException("Skill source path is outside root: " + skill.getId());
+        }
+        try {
+            workspaceMaterializer.ensureNoSymbolicLink(source);
+        } catch (IOException e) {
+            throw new JeecgBootException("Skill source path is not safe: " + e.getMessage(), e);
+        }
         if (!Files.exists(source) || !Files.isDirectory(source)) {
             throw new JeecgBootException("Skill source directory does not exist: " + skill.getId());
         }
@@ -160,6 +170,19 @@ public class OpenclawSkillMaterializer {
             });
         } catch (IOException ignored) {
             // Best effort cleanup.
+        }
+    }
+
+    private void deleteDirectoryStrict(Path path) {
+        if (path == null || !Files.exists(path)) {
+            return;
+        }
+        try (var walk = Files.walk(path)) {
+            for (Path item : walk.sorted(Comparator.reverseOrder()).toList()) {
+                Files.deleteIfExists(item);
+            }
+        } catch (IOException e) {
+            throw new JeecgBootException("Remove skill from workspace failed: " + e.getMessage(), e);
         }
     }
 }
