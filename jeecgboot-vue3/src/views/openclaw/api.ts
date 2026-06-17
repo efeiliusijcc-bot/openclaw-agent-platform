@@ -11,6 +11,8 @@ export const bindSkill = (params) => defHttp.post({ url: '/openclaw/agent/bindSk
 export const unbindSkill = (params) => defHttp.post({ url: '/openclaw/agent/unbindSkill', params });
 
 export const listWorkspaces = (params) => defHttp.get({ url: '/openclaw/workspace/list', params });
+export const checkWorkspaceHealth = (id: string) => defHttp.get({ url: `/openclaw/workspace/${id}/health-check` });
+export const rematerializeWorkspace = (id: string) => defHttp.post({ url: `/openclaw/workspace/${id}/rematerialize` });
 export const listSkills = (params) => defHttp.get({ url: '/openclaw/skill/list', params });
 export const addSkill = (params) => defHttp.post({ url: '/openclaw/skill/add', params });
 export const editSkill = (params) => defHttp.post({ url: '/openclaw/skill/edit', params });

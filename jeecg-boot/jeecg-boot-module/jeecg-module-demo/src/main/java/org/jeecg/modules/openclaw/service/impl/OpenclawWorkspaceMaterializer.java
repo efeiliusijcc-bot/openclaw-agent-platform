@@ -1,6 +1,7 @@
 package org.jeecg.modules.openclaw.service.impl;
 
 import org.jeecg.common.exception.JeecgBootException;
+import org.jeecg.modules.openclaw.constant.OpenclawConstants;
 import org.jeecg.modules.openclaw.entity.OpenclawAgent;
 import org.jeecg.modules.openclaw.entity.OpenclawWorkspace;
 import org.springframework.stereotype.Service;
@@ -20,8 +21,9 @@ public class OpenclawWorkspaceMaterializer {
             throw new JeecgBootException("Workspace path is empty");
         }
         try {
-            Path root = Paths.get(workspace.getPath()).normalize();
+            Path root = safeWorkspacePath(workspace.getPath());
             Files.createDirectories(root);
+            ensureNoSymbolicLink(root);
             Files.createDirectories(root.resolve("skills"));
             Files.createDirectories(root.resolve("files"));
             Files.createDirectories(root.resolve("logs"));
@@ -31,6 +33,28 @@ public class OpenclawWorkspaceMaterializer {
             writeManagedFile(root.resolve("IDENTITY.md"), identity(agent, workspace));
         } catch (IOException e) {
             throw new JeecgBootException("Create OpenClaw workspace files failed: " + e.getMessage(), e);
+        }
+    }
+
+    public Path safeWorkspacePath(String workspacePath) {
+        if (!StringUtils.hasText(workspacePath)) {
+            throw new JeecgBootException("Workspace path is empty");
+        }
+        Path base = Paths.get(OpenclawConstants.WORKSPACE_ROOT).toAbsolutePath().normalize();
+        Path root = Paths.get(workspacePath).toAbsolutePath().normalize();
+        if (!root.startsWith(base)) {
+            throw new JeecgBootException("Workspace path is outside root: " + workspacePath);
+        }
+        return root;
+    }
+
+    public void ensureNoSymbolicLink(Path path) throws IOException {
+        Path current = path.toAbsolutePath().normalize();
+        while (current != null) {
+            if (Files.exists(current) && Files.isSymbolicLink(current)) {
+                throw new IOException("Symbolic link is not allowed: " + current);
+            }
+            current = current.getParent();
         }
     }
 

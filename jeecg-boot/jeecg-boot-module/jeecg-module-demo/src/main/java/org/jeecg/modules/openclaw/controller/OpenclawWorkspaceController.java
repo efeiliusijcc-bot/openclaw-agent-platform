@@ -12,6 +12,7 @@ import org.jeecg.modules.openclaw.constant.OpenclawConstants;
 import org.jeecg.modules.openclaw.entity.OpenclawWorkspace;
 import org.jeecg.modules.openclaw.service.IOpenclawPermissionService;
 import org.jeecg.modules.openclaw.service.IOpenclawWorkspaceService;
+import org.jeecg.modules.openclaw.vo.OpenclawWorkspaceHealthCheckVO;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
@@ -48,5 +49,17 @@ public class OpenclawWorkspaceController {
             permissionService.checkOwnerOrAdmin(workspace.getUserId());
         }
         return Result.OK(workspace);
+    }
+
+    @GetMapping("/{id}/health-check")
+    @RequiresPermissions("openclaw:workspace:list")
+    public Result<OpenclawWorkspaceHealthCheckVO> healthCheck(@PathVariable String id) {
+        return Result.OK(workspaceService.healthCheck(id));
+    }
+
+    @PostMapping("/{id}/rematerialize")
+    @RequiresPermissions("openclaw:workspace:list")
+    public Result<OpenclawWorkspaceHealthCheckVO> rematerialize(@PathVariable String id) {
+        return Result.OK(workspaceService.rematerialize(id));
     }
 }
