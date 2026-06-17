@@ -12,9 +12,11 @@ import org.jeecg.modules.openclaw.entity.OpenclawAgent;
 import org.jeecg.modules.openclaw.entity.OpenclawAgentRun;
 import org.jeecg.modules.openclaw.entity.OpenclawGatewayNode;
 import org.jeecg.modules.openclaw.entity.OpenclawUserQuota;
+import org.jeecg.modules.openclaw.entity.OpenclawWorkspace;
 import org.jeecg.modules.openclaw.mapper.OpenclawAgentMapper;
 import org.jeecg.modules.openclaw.mapper.OpenclawGatewayNodeMapper;
 import org.jeecg.modules.openclaw.mapper.OpenclawAgentRunMapper;
+import org.jeecg.modules.openclaw.mapper.OpenclawWorkspaceMapper;
 import org.jeecg.modules.openclaw.service.IOpenclawAgentRunService;
 import org.jeecg.modules.openclaw.service.IOpenclawAuditLogService;
 import org.jeecg.modules.openclaw.service.IOpenclawPermissionService;
@@ -33,6 +35,10 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.ArrayList;
@@ -52,6 +58,8 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
     private OpenclawAgentMapper agentMapper;
     @Autowired
     private OpenclawGatewayNodeMapper gatewayNodeMapper;
+    @Autowired
+    private OpenclawWorkspaceMapper workspaceMapper;
     @Autowired
     private IOpenclawPermissionService permissionService;
     @Autowired
@@ -77,6 +85,7 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
         OpenclawAgent agent = requireAgent(agentId);
         permissionService.checkOwnerOrAdmin(agent.getUserId());
         String prompt = normalizePrompt(dto);
+        precheckRun(agent);
         checkRunQuota(user, agent);
 
         Date startTime = new Date();
@@ -119,6 +128,7 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
         OpenclawAgent agent = requireAgent(agentId);
         permissionService.checkOwnerOrAdmin(agent.getUserId());
         String prompt = normalizePrompt(dto);
+        precheckRun(agent);
         checkRunQuota(user, agent);
         String conversationId = normalizeConversationId(dto);
 
@@ -381,6 +391,68 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
             throw new JeecgBootException("Agent key is empty; sync the agent to OpenClaw Gateway first");
         }
         return agent;
+    }
+
+    private void precheckRun(OpenclawAgent agent) {
+        precheckWorkspace(agent);
+        precheckGateway(agent);
+    }
+
+    private void precheckWorkspace(OpenclawAgent agent) {
+        if (!StringUtils.hasText(agent.getWorkspaceId())) {
+            throw new JeecgBootException("Agent workspace is not bound; rematerialize the workspace first");
+        }
+        OpenclawWorkspace workspace = workspaceMapper.selectById(agent.getWorkspaceId());
+        if (workspace == null || Integer.valueOf(OpenclawConstants.DEL_FLAG_DELETED).equals(workspace.getDelFlag())) {
+            throw new JeecgBootException("Agent workspace does not exist; rematerialize the workspace first");
+        }
+        if (!java.util.Objects.equals(agent.getUserId(), workspace.getUserId())) {
+            throw new JeecgBootException("Agent workspace owner does not match the agent owner");
+        }
+        if (!OpenclawConstants.WORKSPACE_STATUS_ACTIVE.equals(workspace.getStatus())) {
+            throw new JeecgBootException("Agent workspace is not active: " + workspace.getStatus());
+        }
+        if (!StringUtils.hasText(workspace.getPath())) {
+            throw new JeecgBootException("Agent workspace path is empty; rematerialize the workspace first");
+        }
+        Path workspacePath = normalizePath(workspace.getPath(), "Agent workspace path is invalid");
+        Path rootPath = normalizePath(OpenclawConstants.WORKSPACE_ROOT, "OpenClaw workspace root is invalid");
+        if (!workspacePath.startsWith(rootPath)) {
+            throw new JeecgBootException("Agent workspace path is outside the configured workspace root");
+        }
+        if (Files.isSymbolicLink(workspacePath)) {
+            throw new JeecgBootException("Agent workspace path must not be a symbolic link");
+        }
+        if (!Files.exists(workspacePath) || !Files.isDirectory(workspacePath)) {
+            throw new JeecgBootException("Agent workspace directory is missing; rematerialize the workspace first");
+        }
+    }
+
+    private void precheckGateway(OpenclawAgent agent) {
+        if (!StringUtils.hasText(agent.getGatewayId())) {
+            throw new JeecgBootException("Agent is not assigned to an OpenClaw Gateway; sync Gateway config first");
+        }
+        OpenclawGatewayNode gateway = gatewayNodeMapper.selectById(agent.getGatewayId());
+        if (gateway == null || Integer.valueOf(OpenclawConstants.DEL_FLAG_DELETED).equals(gateway.getDelFlag())) {
+            throw new JeecgBootException("OpenClaw Gateway node does not exist; sync Gateway config first");
+        }
+        if (OpenclawConstants.STATUS_DISABLED.equals(gateway.getStatus())) {
+            throw new JeecgBootException("OpenClaw Gateway node is disabled");
+        }
+        if (!StringUtils.hasText(gateway.getBaseUrl())) {
+            throw new JeecgBootException("OpenClaw Gateway base URL is empty");
+        }
+        if (!OpenclawConstants.RUN_STATUS_SUCCESS.equals(gateway.getLastSyncStatus())) {
+            throw new JeecgBootException("OpenClaw Gateway config is not synced successfully: " + firstText(gateway.getLastSyncMessage(), gateway.getLastSyncStatus()));
+        }
+    }
+
+    private Path normalizePath(String value, String errorMessage) {
+        try {
+            return Paths.get(value).toAbsolutePath().normalize();
+        } catch (InvalidPathException e) {
+            throw new JeecgBootException(errorMessage + ": " + e.getMessage());
+        }
     }
 
     private String normalizePrompt(OpenclawAgentRunTestDTO dto) {
