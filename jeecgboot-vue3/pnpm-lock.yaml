@@ -152,6 +152,9 @@ importers:
       tinymce:
         specifier: 6.6.2
         version: 6.6.2
+      tinycolor2:
+        specifier: 1.6.0
+        version: 1.6.0
       vditor:
         specifier: ^3.11.2
         version: 3.11.2
