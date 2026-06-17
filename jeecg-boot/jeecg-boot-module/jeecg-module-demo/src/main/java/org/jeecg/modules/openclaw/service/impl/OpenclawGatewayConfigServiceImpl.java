@@ -63,6 +63,7 @@ public class OpenclawGatewayConfigServiceImpl implements IOpenclawGatewayConfigS
     @Override
     public OpenclawGatewaySyncResultVO preview(String gatewayId) {
         OpenclawGatewayNode node = requireNode(gatewayId);
+        precheckNode(node);
         RenderedConfig rendered = render(node, false);
         return toResult(node, rendered, "Gateway config preview generated", true);
     }
@@ -70,22 +71,26 @@ public class OpenclawGatewayConfigServiceImpl implements IOpenclawGatewayConfigS
     @Override
     public OpenclawGatewaySyncResultVO sync(String gatewayId) {
         OpenclawGatewayNode node = requireNode(gatewayId);
+        Path backup = null;
         try {
+            precheckNode(node);
             RenderedConfig rendered = render(node, true);
-            writeConfig(configPath(node), rendered);
+            PublishResult publishResult = writeConfig(configPath(node), rendered);
+            backup = publishResult.backup;
             node.setConfigPath(configPath(node));
             node.setWorkspaceRoot(workspaceRoot(node));
             node.setCurrentAgents(rendered.agentCount);
             node.setLastSyncTime(new Date());
             node.setLastSyncStatus("success");
-            node.setLastSyncMessage("Config written. Restart OpenClaw Gateway manually.");
+            node.setLastSyncMessage("Config atomically written. Restart OpenClaw Gateway manually.");
             node.setLastSyncChecksum(rendered.checksum);
             node.setRestartRequired(1);
             gatewayNodeMapper.updateById(node);
-            OpenclawGatewaySyncResultVO result = toResult(node, rendered, "配置已写入，当前版本需要手动重启 OpenClaw Gateway", false);
+            OpenclawGatewaySyncResultVO result = toResult(node, rendered, "Config atomically written. Restart OpenClaw Gateway manually.", false);
             auditLogService.log("gateway_sync", "gateway", node.getId(), syncAuditDetail(result, "success"));
             return result;
         } catch (Exception e) {
+            restoreBackup(configPath(node), backup);
             markFailed(node, e);
             auditLogService.log("gateway_sync", "gateway", node.getId(), failureDetail(e));
             if (e instanceof JeecgBootException) {
@@ -97,7 +102,7 @@ public class OpenclawGatewayConfigServiceImpl implements IOpenclawGatewayConfigS
 
     private RenderedConfig render(OpenclawGatewayNode node, boolean materializeFiles) {
         String workspaceRoot = workspaceRoot(node);
-        ensureWorkspaceRoot(workspaceRoot);
+        ensureWorkspaceRoot(workspaceRoot, materializeFiles);
         JSONObject root = new JSONObject(true);
         JSONObject defaults = new JSONObject(true);
         defaults.put("workspace", workspaceRoot);
@@ -111,6 +116,7 @@ public class OpenclawGatewayConfigServiceImpl implements IOpenclawGatewayConfigS
 
         for (OpenclawAgent agent : agents) {
             OpenclawWorkspace workspace = requireWorkspace(agent);
+            precheckWorkspace(agent, workspace, workspaceRoot);
             if (materializeFiles) {
                 workspaceMaterializer.materialize(agent, workspace);
             }
@@ -147,6 +153,7 @@ public class OpenclawGatewayConfigServiceImpl implements IOpenclawGatewayConfigS
         rendered.agentCount = agents.size();
         rendered.skillCount = uniqueSkills.size();
         rendered.checksum = sha256(rendered.content);
+        validateGeneratedJson(rendered.content);
         return rendered;
     }
 
@@ -158,6 +165,21 @@ public class OpenclawGatewayConfigServiceImpl implements IOpenclawGatewayConfigS
         return node;
     }
 
+    private void precheckNode(OpenclawGatewayNode node) {
+        if ("disabled".equalsIgnoreCase(node.getStatus()) || OpenclawConstants.STATUS_DISABLED.equalsIgnoreCase(node.getStatus())) {
+            throw new JeecgBootException("Gateway node is disabled: " + node.getId());
+        }
+        Path config = configPathAsPath(node);
+        validateGeneratedConfigPath(config);
+        Path parent = config.getParent();
+        if (parent == null) {
+            throw new JeecgBootException("Gateway config path must include parent directory");
+        }
+        if (Files.exists(parent) && !Files.isDirectory(parent)) {
+            throw new JeecgBootException("Gateway config parent is not a directory: " + parent);
+        }
+    }
+
     private OpenclawWorkspace requireWorkspace(OpenclawAgent agent) {
         OpenclawWorkspace workspace = workspaceMapper.selectById(agent.getWorkspaceId());
         if (workspace == null || Integer.valueOf(OpenclawConstants.DEL_FLAG_DELETED).equals(workspace.getDelFlag())) {
@@ -167,6 +189,22 @@ public class OpenclawGatewayConfigServiceImpl implements IOpenclawGatewayConfigS
             throw new JeecgBootException("Workspace path is empty for agent: " + agent.getId());
         }
         return workspace;
+    }
+
+    private void precheckWorkspace(OpenclawAgent agent, OpenclawWorkspace workspace, String workspaceRoot) {
+        Path root = Paths.get(workspaceRoot).toAbsolutePath().normalize();
+        Path path = Paths.get(workspace.getPath()).toAbsolutePath().normalize();
+        if (!path.startsWith(root)) {
+            throw new JeecgBootException("Workspace path is outside gateway workspace root for agent: " + agent.getId());
+        }
+        if (!Files.exists(path) || !Files.isDirectory(path)) {
+            throw new JeecgBootException("Workspace directory does not exist for agent: " + agent.getId());
+        }
+        try {
+            workspaceMaterializer.ensureNoSymbolicLink(path);
+        } catch (IOException e) {
+            throw new JeecgBootException("Workspace path is not safe for agent: " + agent.getId() + ", " + e.getMessage(), e);
+        }
     }
 
     private List<OpenclawSkill> enabledSkills(OpenclawAgent agent) {
@@ -188,31 +226,40 @@ public class OpenclawGatewayConfigServiceImpl implements IOpenclawGatewayConfigS
         return skills;
     }
 
-    private void ensureWorkspaceRoot(String workspaceRoot) {
+    private void ensureWorkspaceRoot(String workspaceRoot, boolean createIfMissing) {
         try {
-            Files.createDirectories(Paths.get(workspaceRoot).normalize());
+            Path root = Paths.get(workspaceRoot).toAbsolutePath().normalize();
+            if (createIfMissing) {
+                Files.createDirectories(root);
+            }
+            if (!Files.exists(root) || !Files.isDirectory(root)) {
+                throw new JeecgBootException("Workspace root does not exist: " + workspaceRoot);
+            }
+            workspaceMaterializer.ensureNoSymbolicLink(root);
         } catch (IOException e) {
             throw new JeecgBootException("Workspace root is not writable: " + workspaceRoot, e);
         }
     }
 
-    private void writeConfig(String configPath, RenderedConfig rendered) throws IOException {
+    private PublishResult writeConfig(String configPath, RenderedConfig rendered) throws IOException {
         if (!StringUtils.hasText(configPath)) {
             throw new JeecgBootException("Gateway config path is empty");
         }
-        Path target = Paths.get(configPath).normalize();
+        Path target = Paths.get(configPath).toAbsolutePath().normalize();
         Path parent = target.getParent();
         if (parent == null) {
             throw new JeecgBootException("Gateway config path must include parent directory");
         }
         validateGeneratedConfigPath(target);
         Files.createDirectories(parent);
+        workspaceMaterializer.ensureNoSymbolicLink(parent);
         if (!Files.isWritable(parent)) {
             throw new JeecgBootException("Gateway config parent directory is not writable: " + parent);
         }
         Path temp = parent.resolve(target.getFileName().toString() + ".tmp-" + IdWorker.getIdStr());
         Path backup = parent.resolve(target.getFileName().toString() + ".bak." + new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));
         Files.writeString(temp, rendered.content, StandardCharsets.UTF_8);
+        validateGeneratedJson(Files.readString(temp, StandardCharsets.UTF_8));
         if (Files.exists(target)) {
             Files.copy(target, backup, StandardCopyOption.REPLACE_EXISTING);
         }
@@ -221,6 +268,10 @@ public class OpenclawGatewayConfigServiceImpl implements IOpenclawGatewayConfigS
         } catch (IOException atomicMoveError) {
             Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING);
         }
+        validateGeneratedJson(Files.readString(target, StandardCharsets.UTF_8));
+        PublishResult result = new PublishResult();
+        result.backup = Files.exists(backup) ? backup : null;
+        return result;
     }
 
     private void validateGeneratedConfigPath(Path target) {
@@ -235,6 +286,10 @@ public class OpenclawGatewayConfigServiceImpl implements IOpenclawGatewayConfigS
 
     private String configPath(OpenclawGatewayNode node) {
         return StringUtils.hasText(node.getConfigPath()) ? node.getConfigPath() : OpenclawConstants.DEFAULT_GATEWAY_CONFIG_PATH;
+    }
+
+    private Path configPathAsPath(OpenclawGatewayNode node) {
+        return Paths.get(configPath(node)).toAbsolutePath().normalize();
     }
 
     private String workspaceRoot(OpenclawGatewayNode node) {
@@ -307,11 +362,42 @@ public class OpenclawGatewayConfigServiceImpl implements IOpenclawGatewayConfigS
         return value.substring(0, maxLength);
     }
 
+    private void validateGeneratedJson(String content) {
+        try {
+            JSONObject root = JSON.parseObject(content);
+            if (!root.containsKey("defaults") || !root.containsKey("list")) {
+                throw new JeecgBootException("Generated Gateway config must contain defaults and list");
+            }
+            if (!(root.get("list") instanceof JSONArray)) {
+                throw new JeecgBootException("Generated Gateway config list must be an array");
+            }
+        } catch (JeecgBootException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new JeecgBootException("Generated Gateway config is not valid JSON: " + e.getMessage(), e);
+        }
+    }
+
+    private void restoreBackup(String configPath, Path backup) {
+        if (backup == null || !Files.exists(backup)) {
+            return;
+        }
+        try {
+            Files.copy(backup, Paths.get(configPath).toAbsolutePath().normalize(), StandardCopyOption.REPLACE_EXISTING);
+        } catch (IOException ignored) {
+            // Keep the original sync failure as the user-facing error.
+        }
+    }
+
     private static class RenderedConfig {
         private String content;
         private String previewContent;
         private int agentCount;
         private int skillCount;
         private String checksum;
+    }
+
+    private static class PublishResult {
+        private Path backup;
     }
 }
