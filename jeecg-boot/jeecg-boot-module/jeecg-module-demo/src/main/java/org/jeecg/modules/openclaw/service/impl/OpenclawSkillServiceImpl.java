@@ -148,6 +148,10 @@ public class OpenclawSkillServiceImpl extends ServiceImpl<OpenclawSkillMapper, O
                     && (OpenclawConstants.SKILL_STATUS_APPROVED.equals(status) || OpenclawConstants.SKILL_STATUS_REJECTED.equals(status))) {
                     throw new JeecgBootException("Use the Skill review workflow to approve or reject Skills.");
                 }
+                if (OpenclawConstants.SKILL_STATUS_DISABLED.equals(status)
+                    && !OpenclawConstants.SKILL_STATUS_DISABLED.equals(skill.getStatus())) {
+                    rejectDisableWhenBound(skill, "skill_update");
+                }
                 skill.setStatus(status);
             }
         }
@@ -320,6 +324,7 @@ public class OpenclawSkillServiceImpl extends ServiceImpl<OpenclawSkillMapper, O
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public void disableSkill(String id) {
         OpenclawSkill skill = getById(id);
         if (skill == null) {
@@ -328,9 +333,24 @@ public class OpenclawSkillServiceImpl extends ServiceImpl<OpenclawSkillMapper, O
         if (!permissionService.isAdmin(permissionService.currentUser())) {
             throw new JeecgBootException("Only OpenClaw administrators can disable Skills.");
         }
+        rejectDisableWhenBound(skill, "skill_disable");
         skill.setStatus(OpenclawConstants.SKILL_STATUS_DISABLED);
         updateById(skill);
         auditLogService.log("skill_disable", "skill", skill.getId(), skill);
+    }
+
+    private void rejectDisableWhenBound(OpenclawSkill skill, String action) {
+        int boundAgents = agentSkillService.countEnabledBySkill(skill.getId());
+        if (boundAgents <= 0) {
+            return;
+        }
+        JSONObject detail = new JSONObject(true);
+        detail.put("skillId", skill.getId());
+        detail.put("skillSlug", skill.getSlug());
+        detail.put("boundAgents", boundAgents);
+        detail.put("reason", "Skill is still bound to active Agents");
+        auditLogService.logFailure(action, "skill", skill.getId(), detail);
+        throw new JeecgBootException("Skill is bound to " + boundAgents + " active Agent(s). Unbind it before disabling.");
     }
 
     @Override
