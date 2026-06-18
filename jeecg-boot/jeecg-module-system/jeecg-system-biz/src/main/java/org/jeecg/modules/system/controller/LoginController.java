@@ -38,6 +38,7 @@ import org.jeecg.modules.system.service.impl.SysBaseApiImpl;
 import org.jeecg.modules.system.util.RandImageUtil;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
@@ -77,6 +78,8 @@ public class LoginController {
 	private BaseCommonService baseCommonService;
 	@Autowired
 	private JeecgBaseConfig jeecgBaseConfig;
+	@Value("${openclaw.sso.trusted-proxies:127.0.0.1,0:0:0:0:0:0:0:1,::1}")
+	private String headerSsoTrustedProxies;
 	
 	private final String BASE_CHECK_CODES = "qwertyuiplkjhgfdsazxcvbnmQWERTYUPLKJHGFDSAZXCVBNM1234567890";
 	/**
@@ -186,6 +189,10 @@ public class LoginController {
 	@GetMapping("/sso/header-login")
 	public Result<JSONObject> headerSsoLogin(HttpServletRequest request) {
 		Result<JSONObject> result = new Result<>();
+		if (!isTrustedHeaderSsoProxy(request)) {
+			log.warn("Rejected Header SSO login from untrusted remote address: {}", request.getRemoteAddr());
+			return Result.error(HttpStatus.FORBIDDEN.value(), "SSO login failed: untrusted proxy");
+		}
 		String email = normalizeHeader(request.getHeader("X-Auth-Request-Email"));
 		String externalUser = normalizeHeader(request.getHeader("X-Auth-Request-User"));
 		String groups = normalizeHeader(request.getHeader("X-Auth-Request-Groups"));
@@ -593,6 +600,19 @@ public class LoginController {
 
 	private String normalizeHeader(String value) {
 		return value == null ? null : value.trim();
+	}
+
+	private boolean isTrustedHeaderSsoProxy(HttpServletRequest request) {
+		String remoteAddr = request.getRemoteAddr();
+		if (oConvertUtils.isEmpty(remoteAddr) || oConvertUtils.isEmpty(headerSsoTrustedProxies)) {
+			return false;
+		}
+		for (String trustedProxy : headerSsoTrustedProxies.split("[,;\\s]+")) {
+			if (remoteAddr.equals(trustedProxy.trim())) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	private SysUser createHeaderSsoUser(String email, String externalUser) {
