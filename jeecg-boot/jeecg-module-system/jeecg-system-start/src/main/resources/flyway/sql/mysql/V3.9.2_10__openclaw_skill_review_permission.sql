@@ -1,0 +1,6 @@
+INSERT IGNORE INTO sys_role_permission (id, role_id, permission_id) VALUES
+(MD5('openclaw-reviewer-008'), 'oc000000000000000000000000000003', 'ocp000000000000000000000000008');
+
+DELETE FROM sys_role_permission
+WHERE role_id = 'oc000000000000000000000000000003'
+  AND permission_id = 'ocp000000000000000000000000205';
