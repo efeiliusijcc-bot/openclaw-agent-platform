@@ -20,8 +20,7 @@ public class OpenclawPermissionServiceImpl implements IOpenclawPermissionService
 
     @Override
     public boolean isAdmin(LoginUser user) {
-        return SecurityUtils.getSubject().hasRole("admin")
-            || SecurityUtils.getSubject().hasRole(OpenclawConstants.ROLE_ADMIN);
+        return SecurityUtils.getSubject().hasRole(OpenclawConstants.ROLE_ADMIN);
     }
 
     @Override
