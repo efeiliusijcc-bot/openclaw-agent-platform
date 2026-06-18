@@ -45,9 +45,11 @@ public class OpenclawSkillMaterializer {
             if (skill == null || Integer.valueOf(OpenclawConstants.DEL_FLAG_DELETED).equals(skill.getDelFlag())) {
                 throw new JeecgBootException("Bound skill does not exist: " + binding.getSkillId());
             }
-            if (!OpenclawConstants.STATUS_DISABLED.equals(skill.getStatus())) {
-                copySkillToAgent(agent, skill);
+            if (!isMaterializableSkill(skill)) {
+                throw new JeecgBootException("Bound skill status does not allow workspace materialization: "
+                    + skill.getSlug() + ", status=" + skill.getStatus());
             }
+            copySkillToAgent(agent, skill);
         }
     }
 
@@ -102,6 +104,11 @@ public class OpenclawSkillMaterializer {
             throw new JeecgBootException("Workspace does not exist for agent: " + agent.getId());
         }
         return workspace;
+    }
+
+    private boolean isMaterializableSkill(OpenclawSkill skill) {
+        return OpenclawConstants.SKILL_STATUS_APPROVED.equals(skill.getStatus())
+            || OpenclawConstants.SKILL_STATUS_PRIVATE.equals(skill.getStatus());
     }
 
     private Path requireSkillSource(OpenclawSkill skill) {

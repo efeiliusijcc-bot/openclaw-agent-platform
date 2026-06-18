@@ -223,6 +223,10 @@ public class OpenclawWorkspaceServiceImpl extends ServiceImpl<OpenclawWorkspaceM
                 result.getErrors().add("Bound skill is missing: " + binding.getSkillId());
                 continue;
             }
+            if (!isRunnableSkill(skill)) {
+                result.getErrors().add("Bound skill status is not runnable: " + skill.getSlug() + ", status=" + skill.getStatus());
+                continue;
+            }
             Path skillPath = skillsRoot.resolve(skill.getSlug()).normalize();
             if (!skillPath.startsWith(skillsRoot) || !Files.isDirectory(skillPath)) {
                 result.getErrors().add("Bound skill files are missing: " + skill.getSlug());
@@ -233,6 +237,11 @@ public class OpenclawWorkspaceServiceImpl extends ServiceImpl<OpenclawWorkspaceM
                 checkReadable(skillPath, "skills/" + skill.getSlug(), result);
             }
         }
+    }
+
+    private boolean isRunnableSkill(OpenclawSkill skill) {
+        return OpenclawConstants.SKILL_STATUS_APPROVED.equals(skill.getStatus())
+            || OpenclawConstants.SKILL_STATUS_PRIVATE.equals(skill.getStatus());
     }
 
     private void checkReadable(Path path, String label, OpenclawWorkspaceHealthCheckVO result) {
