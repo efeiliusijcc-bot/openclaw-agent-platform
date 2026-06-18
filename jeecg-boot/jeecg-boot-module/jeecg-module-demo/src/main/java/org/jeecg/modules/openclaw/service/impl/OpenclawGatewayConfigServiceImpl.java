@@ -87,6 +87,7 @@ public class OpenclawGatewayConfigServiceImpl implements IOpenclawGatewayConfigS
             node.setLastSyncChecksum(rendered.checksum);
             node.setRestartRequired(1);
             gatewayNodeMapper.updateById(node);
+            bindAgentsToGateway(rendered.agentIds, node.getId());
             OpenclawGatewaySyncResultVO result = toResult(node, rendered, "Config atomically written. Restart OpenClaw Gateway manually.", false);
             auditLogService.logSuccess("gateway_sync", "gateway", node.getId(), syncAuditDetail(result, "success"));
             return result;
@@ -108,6 +109,7 @@ public class OpenclawGatewayConfigServiceImpl implements IOpenclawGatewayConfigS
         JSONObject defaults = new JSONObject(true);
         defaults.put("workspace", workspaceRoot);
         JSONArray list = new JSONArray();
+        List<String> renderedAgentIds = new ArrayList<>();
         Set<String> uniqueSkills = new LinkedHashSet<>();
 
         List<OpenclawAgent> agents = agentMapper.selectList(new LambdaQueryWrapper<OpenclawAgent>()
@@ -121,6 +123,7 @@ public class OpenclawGatewayConfigServiceImpl implements IOpenclawGatewayConfigS
             if (materializeFiles) {
                 workspaceMaterializer.materialize(agent, workspace);
             }
+            renderedAgentIds.add(agent.getId());
             List<OpenclawSkill> skills = enabledSkills(agent);
             if (materializeFiles) {
                 for (OpenclawSkill skill : skills) {
@@ -153,9 +156,19 @@ public class OpenclawGatewayConfigServiceImpl implements IOpenclawGatewayConfigS
         rendered.previewContent = previewContent + System.lineSeparator();
         rendered.agentCount = agents.size();
         rendered.skillCount = uniqueSkills.size();
+        rendered.agentIds = renderedAgentIds;
         rendered.checksum = sha256(rendered.content);
         validateGeneratedJson(rendered.content);
         return rendered;
+    }
+
+    private void bindAgentsToGateway(List<String> agentIds, String gatewayId) {
+        for (String agentId : agentIds) {
+            OpenclawAgent update = new OpenclawAgent();
+            update.setId(agentId);
+            update.setGatewayId(gatewayId);
+            agentMapper.updateById(update);
+        }
     }
 
     private OpenclawGatewayNode requireNode(String gatewayId) {
@@ -404,6 +417,7 @@ public class OpenclawGatewayConfigServiceImpl implements IOpenclawGatewayConfigS
     private static class RenderedConfig {
         private String content;
         private String previewContent;
+        private List<String> agentIds = new ArrayList<>();
         private int agentCount;
         private int skillCount;
         private String checksum;
