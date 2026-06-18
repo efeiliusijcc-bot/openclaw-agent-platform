@@ -167,7 +167,7 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
             checkRunQuotaForExecution(user, agent, run.getId());
             markRunRunning(run, agent);
             gatewayRunningTracked = true;
-            sendEvent(emitter, "run_created", streamPayload(run, agent, null, null));
+            sendEventToClient(emitter, "run_created", streamPayload(run, agent, null, null));
             output = executeGatewayStream(agent, model, prompt, conversationId, emitter);
             finishRun(run, startTime, OpenclawConstants.RUN_STATUS_SUCCESS, output, null);
             persistRunArtifacts(run, agent, null, output, null);
@@ -181,6 +181,8 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
             emitter.complete();
         } catch (RunTimeoutException e) {
             finishFailedStreamRun(run, startTime, OpenclawConstants.RUN_STATUS_TIMEOUT, e.getMessage(), agent, emitter, "timeout");
+        } catch (SseClientDisconnectedException e) {
+            finishDisconnectedStreamRun(run, startTime, agent, e);
         } catch (Exception e) {
             finishFailedStreamRun(run, startTime, OpenclawConstants.RUN_STATUS_FAILED, e, agent, emitter, "error");
         } finally {
@@ -339,7 +341,7 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
             return;
         }
         output.append(delta);
-        sendEvent(emitter, "delta", new JSONObject().fluentPut("text", delta));
+        sendEventToClient(emitter, "delta", new JSONObject().fluentPut("text", delta));
     }
 
     private void finishRun(OpenclawAgentRun run, Date startTime, String status, String output, String error) {
@@ -380,6 +382,20 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
             emitter.complete();
         } catch (Exception sendError) {
             emitter.completeWithError(sendError);
+        }
+    }
+
+    private void finishDisconnectedStreamRun(OpenclawAgentRun run, Date startTime, OpenclawAgent agent, Exception error) {
+        if (run == null) {
+            return;
+        }
+        String message = "SSE client disconnected before the run completed";
+        finishRun(run, startTime, OpenclawConstants.RUN_STATUS_CANCELLED, null, message);
+        if (agent != null) {
+            run.setErrorType(OpenclawConstants.RUN_ERROR_CLIENT_DISCONNECTED);
+            persistRunArtifacts(run, agent, null, null, error);
+            updateById(run);
+            safeAuditLog("agent_chat_stream", run, agent);
         }
     }
 
@@ -425,6 +441,14 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
 
     private void sendEvent(SseEmitter emitter, String event, Object data) throws IOException {
         emitter.send(SseEmitter.event().name(event).data(data));
+    }
+
+    private void sendEventToClient(SseEmitter emitter, String event, Object data) throws IOException {
+        try {
+            sendEvent(emitter, event, data);
+        } catch (IOException e) {
+            throw new SseClientDisconnectedException(e);
+        }
     }
 
     private OpenclawAgent requireAgent(String agentId) {
@@ -862,6 +886,9 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
     }
 
     private String classifyError(Exception e) {
+        if (e instanceof SseClientDisconnectedException) {
+            return OpenclawConstants.RUN_ERROR_CLIENT_DISCONNECTED;
+        }
         if (e instanceof RunTimeoutException) {
             return OpenclawConstants.RUN_ERROR_GATEWAY_TIMEOUT;
         }
@@ -923,6 +950,12 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
     private static class RunQuotaException extends JeecgBootException {
         private RunQuotaException(String message, Throwable cause) {
             super(message, cause);
+        }
+    }
+
+    private static class SseClientDisconnectedException extends RuntimeException {
+        private SseClientDisconnectedException(Throwable cause) {
+            super("SSE client disconnected", cause);
         }
     }
 }

@@ -49,6 +49,7 @@ public final class OpenclawConstants {
     public static final String RUN_ERROR_QUOTA_EXCEEDED = "quota_exceeded";
     public static final String RUN_ERROR_OPENCLAW_ERROR = "openclaw_error";
     public static final String RUN_ERROR_CLI_FALLBACK_FAILED = "cli_fallback_failed";
+    public static final String RUN_ERROR_CLIENT_DISCONNECTED = "client_disconnected";
     public static final String RUN_ERROR_UNKNOWN = "unknown_error";
 
     public static final int DEL_FLAG_NORMAL = 0;
