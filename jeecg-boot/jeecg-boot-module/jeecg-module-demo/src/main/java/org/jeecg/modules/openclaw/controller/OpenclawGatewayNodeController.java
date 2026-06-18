@@ -32,11 +32,18 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Set;
 
 @Tag(name = "OpenClaw Gateway Node")
 @RestController
 @RequestMapping("/openclaw/gateway")
 public class OpenclawGatewayNodeController {
+    private static final Set<String> GATEWAY_STATUSES = Set.of(
+        OpenclawConstants.GATEWAY_STATUS_ONLINE,
+        OpenclawConstants.GATEWAY_STATUS_OFFLINE,
+        OpenclawConstants.GATEWAY_STATUS_DISABLED
+    );
+
     @Autowired
     private IOpenclawGatewayNodeService gatewayNodeService;
     @Autowired
@@ -61,7 +68,7 @@ public class OpenclawGatewayNodeController {
     public Result<?> add(@RequestBody OpenclawGatewayNode node) {
         node.setCurrentAgents(0);
         node.setCurrentRunning(0);
-        node.setStatus(node.getStatus() == null ? "offline" : node.getStatus());
+        node.setStatus(StringUtils.hasText(node.getStatus()) ? node.getStatus() : OpenclawConstants.GATEWAY_STATUS_OFFLINE);
         fillGatewayDefaults(node);
         validateGatewayNode(node);
         node.setDelFlag(OpenclawConstants.DEL_FLAG_NORMAL);
@@ -118,11 +125,20 @@ public class OpenclawGatewayNodeController {
         if (!StringUtils.hasText(node.getName())) {
             throw new JeecgBootException("Gateway name is required");
         }
+        node.setStatus(normalizeGatewayStatus(node.getStatus()));
         validateGatewayBaseUrl(node.getBaseUrl());
         validateAbsoluteDirectory("Gateway workspace root", node.getWorkspaceRoot());
         validateGeneratedConfigPath(node.getConfigPath());
         validateNonNegative("maxAgents", node.getMaxAgents());
         validateNonNegative("maxConcurrentRuns", node.getMaxConcurrentRuns());
+    }
+
+    private String normalizeGatewayStatus(String status) {
+        String normalized = StringUtils.hasText(status) ? status.trim().toLowerCase() : OpenclawConstants.GATEWAY_STATUS_OFFLINE;
+        if (!GATEWAY_STATUSES.contains(normalized)) {
+            throw new JeecgBootException("Unsupported Gateway status: " + status);
+        }
+        return normalized;
     }
 
     private void validateGatewayBaseUrl(String baseUrl) {

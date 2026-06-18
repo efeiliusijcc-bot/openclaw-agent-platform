@@ -142,9 +142,19 @@ public class OpenclawSystemHealthServiceImpl implements IOpenclawSystemHealthSer
     }
 
     private void fillGatewayStatus(OpenclawSystemHealthVO.GatewayHealth item) {
-        if (OpenclawConstants.STATUS_DISABLED.equals(item.getStatus())) {
+        if (OpenclawConstants.GATEWAY_STATUS_DISABLED.equals(item.getStatus())) {
             item.setHealthStatus(STATUS_WARN);
             item.setHealthMessage("Gateway node is disabled");
+            return;
+        }
+        if (OpenclawConstants.GATEWAY_STATUS_OFFLINE.equals(item.getStatus())) {
+            item.setHealthStatus(STATUS_WARN);
+            item.setHealthMessage("Gateway node is offline");
+            return;
+        }
+        if (!OpenclawConstants.GATEWAY_STATUS_ONLINE.equals(item.getStatus())) {
+            item.setHealthStatus(STATUS_WARN);
+            item.setHealthMessage("Gateway node status is unknown: " + firstText(item.getStatus(), "empty"));
             return;
         }
         if (!StringUtils.hasText(item.getBaseUrl())) {

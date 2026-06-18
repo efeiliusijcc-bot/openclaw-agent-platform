@@ -479,8 +479,8 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
         if (gateway == null || Integer.valueOf(OpenclawConstants.DEL_FLAG_DELETED).equals(gateway.getDelFlag())) {
             throw new JeecgBootException("OpenClaw Gateway node does not exist; sync Gateway config first");
         }
-        if (OpenclawConstants.STATUS_DISABLED.equals(gateway.getStatus())) {
-            throw new JeecgBootException("OpenClaw Gateway node is disabled");
+        if (!OpenclawConstants.GATEWAY_STATUS_ONLINE.equals(gateway.getStatus())) {
+            throw new JeecgBootException("OpenClaw Gateway node is not online: " + firstText(gateway.getStatus(), "empty"));
         }
         if (!StringUtils.hasText(gateway.getBaseUrl())) {
             throw new JeecgBootException("OpenClaw Gateway base URL is empty");
