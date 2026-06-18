@@ -1,5 +1,6 @@
 package org.jeecg.modules.openclaw.service.impl;
 
+import com.alibaba.fastjson.JSON;
 import com.baomidou.mybatisplus.core.toolkit.IdWorker;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import org.jeecg.common.exception.JeecgBootException;
@@ -50,9 +51,7 @@ public class OpenclawAgentServiceImpl extends ServiceImpl<OpenclawAgentMapper, O
     @Transactional(rollbackFor = Exception.class)
     public OpenclawAgent createAgent(OpenclawAgentCreateDTO dto) {
         LoginUser user = permissionService.currentUser();
-        if (!StringUtils.hasText(dto.getName())) {
-            throw new JeecgBootException("Agent 名称不能为空");
-        }
+        validateAgentCreateRequest(user, dto);
         OpenclawUserQuota quota = quotaService.getOrCreateQuota(user);
         if (!OpenclawConstants.STATUS_ENABLED.equals(quota.getStatus())) {
             throw new JeecgBootException("当前用户配额已禁用，请联系管理员");
@@ -65,13 +64,14 @@ public class OpenclawAgentServiceImpl extends ServiceImpl<OpenclawAgentMapper, O
             throw new JeecgBootException("Agent 配额不足，请联系管理员增加配额");
         }
         String agentKey = generateAgentKey();
-        OpenclawWorkspace workspace = workspaceService.createForAgent(user, dto.getName(), agentKey);
+        String name = dto.getName().trim();
+        OpenclawWorkspace workspace = workspaceService.createForAgent(user, name, agentKey);
         OpenclawAgent agent = new OpenclawAgent();
         agent.setUserId(user.getId());
         agent.setUsername(user.getUsername());
         agent.setWorkspaceId(workspace.getId());
         agent.setAgentKey(agentKey);
-        agent.setName(dto.getName());
+        agent.setName(name);
         agent.setDescription(dto.getDescription());
         agent.setStatus(OpenclawConstants.AGENT_STATUS_DRAFT);
         agent.setMaxSkills(dto.getMaxSkills() == null ? 10 : dto.getMaxSkills());
@@ -95,7 +95,8 @@ public class OpenclawAgentServiceImpl extends ServiceImpl<OpenclawAgentMapper, O
             throw new JeecgBootException("Agent 不存在");
         }
         permissionService.checkOwnerOrAdmin(agent.getUserId());
-        agent.setName(dto.getName());
+        validateAgentEditRequest(agent, dto);
+        agent.setName(dto.getName().trim());
         agent.setDescription(dto.getDescription());
         if (StringUtils.hasText(dto.getStatus())) {
             agent.setStatus(normalizeEditableStatus(dto.getStatus()));
@@ -141,6 +142,61 @@ public class OpenclawAgentServiceImpl extends ServiceImpl<OpenclawAgentMapper, O
 
     private String generateAgentKey() {
         return "agt_" + IdWorker.getIdStr();
+    }
+
+    private void validateAgentCreateRequest(LoginUser user, OpenclawAgentCreateDTO dto) {
+        if (dto == null || !StringUtils.hasText(dto.getName())) {
+            throw new JeecgBootException("Agent name is required");
+        }
+        validateAgentName(user.getId(), null, dto.getName());
+        validateAgentLimits(dto.getMaxSkills(), dto.getMaxDailyRuns());
+        validateConfigJson(dto.getConfigJson());
+    }
+
+    private void validateAgentEditRequest(OpenclawAgent agent, OpenclawAgentEditDTO dto) {
+        if (dto == null || !StringUtils.hasText(dto.getName())) {
+            throw new JeecgBootException("Agent name is required");
+        }
+        validateAgentName(agent.getUserId(), agent.getId(), dto.getName());
+        validateAgentLimits(dto.getMaxSkills(), dto.getMaxDailyRuns());
+        validateConfigJson(dto.getConfigJson());
+    }
+
+    private void validateAgentName(String userId, String currentAgentId, String name) {
+        String normalized = name.trim();
+        if (normalized.length() > 100) {
+            throw new JeecgBootException("Agent name is too long, max length is 100");
+        }
+        var query = lambdaQuery()
+            .eq(OpenclawAgent::getUserId, userId)
+            .eq(OpenclawAgent::getName, normalized)
+            .eq(OpenclawAgent::getDelFlag, OpenclawConstants.DEL_FLAG_NORMAL);
+        if (StringUtils.hasText(currentAgentId)) {
+            query.ne(OpenclawAgent::getId, currentAgentId);
+        }
+        if (query.count() > 0) {
+            throw new JeecgBootException("Agent name already exists for this user");
+        }
+    }
+
+    private void validateAgentLimits(Integer maxSkills, Integer maxDailyRuns) {
+        if (maxSkills != null && maxSkills < 0) {
+            throw new JeecgBootException("Agent maxSkills must not be negative");
+        }
+        if (maxDailyRuns != null && maxDailyRuns < 0) {
+            throw new JeecgBootException("Agent maxDailyRuns must not be negative");
+        }
+    }
+
+    private void validateConfigJson(String configJson) {
+        if (!StringUtils.hasText(configJson)) {
+            return;
+        }
+        try {
+            JSON.parseObject(configJson);
+        } catch (Exception e) {
+            throw new JeecgBootException("Agent configJson must be a valid JSON object", e);
+        }
     }
 
     private String normalizeEditableStatus(String status) {
