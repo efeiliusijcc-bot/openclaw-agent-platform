@@ -54,6 +54,8 @@ public class OpenclawSystemHealthVO {
         private String id;
         private String name;
         private String status;
+        private String healthStatus;
+        private String healthMessage;
         private String baseUrl;
         private String configPath;
         private String lastSyncStatus;

@@ -137,7 +137,38 @@ public class OpenclawSystemHealthServiceImpl implements IOpenclawSystemHealthSer
         item.setLastSyncTime(node.getLastSyncTime());
         item.setRestartRequired(Integer.valueOf(1).equals(node.getRestartRequired()));
         item.setConfigFile(pathHealth("gatewayConfig:" + node.getId(), configPath(node), false));
+        fillGatewayStatus(item);
         return item;
+    }
+
+    private void fillGatewayStatus(OpenclawSystemHealthVO.GatewayHealth item) {
+        if (OpenclawConstants.STATUS_DISABLED.equals(item.getStatus())) {
+            item.setHealthStatus(STATUS_WARN);
+            item.setHealthMessage("Gateway node is disabled");
+            return;
+        }
+        if (!StringUtils.hasText(item.getBaseUrl())) {
+            item.setHealthStatus(STATUS_WARN);
+            item.setHealthMessage("Gateway base URL is empty");
+            return;
+        }
+        if (item.getConfigFile() != null && STATUS_DOWN.equals(item.getConfigFile().getStatus())) {
+            item.setHealthStatus(STATUS_DOWN);
+            item.setHealthMessage("Gateway config file is not available: " + item.getConfigFile().getMessage());
+            return;
+        }
+        if (!OpenclawConstants.RUN_STATUS_SUCCESS.equals(item.getLastSyncStatus())) {
+            item.setHealthStatus(STATUS_WARN);
+            item.setHealthMessage("Last sync is not successful: " + firstText(item.getLastSyncMessage(), item.getLastSyncStatus(), "never synced"));
+            return;
+        }
+        if (Boolean.TRUE.equals(item.getRestartRequired())) {
+            item.setHealthStatus(STATUS_WARN);
+            item.setHealthMessage("Gateway restart is required after config sync");
+            return;
+        }
+        item.setHealthStatus(STATUS_UP);
+        item.setHealthMessage("Gateway config is synced");
     }
 
     private OpenclawAgentRun latestFailedRun() {
@@ -216,7 +247,9 @@ public class OpenclawSystemHealthServiceImpl implements IOpenclawSystemHealthSer
         boolean configsUp = health.getGateways().stream()
             .map(OpenclawSystemHealthVO.GatewayHealth::getConfigFile)
             .noneMatch(item -> item != null && STATUS_DOWN.equals(item.getStatus()));
-        return componentsUp && pathsUp && configsUp;
+        boolean gatewaysUp = health.getGateways().stream()
+            .noneMatch(item -> STATUS_DOWN.equals(item.getHealthStatus()));
+        return componentsUp && pathsUp && configsUp && gatewaysUp;
     }
 
     private String configPath(OpenclawGatewayNode node) {
@@ -228,5 +261,14 @@ public class OpenclawSystemHealthServiceImpl implements IOpenclawSystemHealthSer
             return value;
         }
         return value.substring(0, 500);
+    }
+
+    private String firstText(String... values) {
+        for (String value : values) {
+            if (StringUtils.hasText(value)) {
+                return value;
+            }
+        }
+        return null;
     }
 }

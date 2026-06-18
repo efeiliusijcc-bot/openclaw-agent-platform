@@ -40,6 +40,9 @@
     <a-card title="Gateway" size="small">
       <a-table size="small" rowKey="id" :columns="gatewayColumns" :dataSource="health?.gateways || []" :pagination="false">
         <template #bodyCell="{ column, record }">
+          <template v-if="column.dataIndex === 'healthStatus'">
+            <a-tag :color="statusColor(record.healthStatus)">{{ record.healthStatus || '-' }}</a-tag>
+          </template>
           <template v-if="column.dataIndex === 'lastSyncStatus'">
             <a-tag :color="statusColor(record.lastSyncStatus === 'success' ? 'UP' : 'WARN')">{{ record.lastSyncStatus || '-' }}</a-tag>
           </template>
@@ -85,6 +88,8 @@
     { title: '信息', dataIndex: 'message', width: 240 },
   ];
   const gatewayColumns = [
+    { title: 'Health', dataIndex: 'healthStatus', width: 100 },
+    { title: 'Health Message', dataIndex: 'healthMessage', width: 260 },
     { title: '名称', dataIndex: 'name', width: 220 },
     { title: '节点状态', dataIndex: 'status', width: 100 },
     { title: '同步状态', dataIndex: 'lastSyncStatus', width: 120 },
