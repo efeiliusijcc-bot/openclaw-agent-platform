@@ -69,19 +69,7 @@ public class OpenclawSkillController {
     @RequestMapping(value = "/edit", method = {RequestMethod.PUT, RequestMethod.POST})
     @RequiresPermissions("openclaw:skill:edit")
     public Result<?> edit(@RequestBody OpenclawSkill request) {
-        OpenclawSkill skill = skillService.getById(request.getId());
-        if (skill == null || Integer.valueOf(OpenclawConstants.DEL_FLAG_DELETED).equals(skill.getDelFlag())) {
-            throw new JeecgBootException("Skill does not exist");
-        }
-        permissionService.checkOwnerOrAdmin(skill.getOwnerUserId());
-        skill.setName(request.getName());
-        skill.setDescription(request.getDescription());
-        skill.setRemark(request.getRemark());
-        if (permissionService.isAdmin(permissionService.currentUser())) {
-            skill.setScope(request.getScope());
-            skill.setStatus(request.getStatus());
-        }
-        skillService.updateById(skill);
+        skillService.updateSkillMetadata(request);
         return Result.OK("Updated successfully");
     }
 

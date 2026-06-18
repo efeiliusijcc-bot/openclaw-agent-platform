@@ -10,6 +10,8 @@ import org.springframework.web.multipart.MultipartFile;
 public interface IOpenclawSkillService extends IService<OpenclawSkill> {
     OpenclawSkill createDraftSkill(OpenclawSkill request);
 
+    OpenclawSkill updateSkillMetadata(OpenclawSkill request);
+
     OpenclawSkillImportResultVO importSkill(MultipartFile file);
 
     void exportSkill(String id, HttpServletResponse response);

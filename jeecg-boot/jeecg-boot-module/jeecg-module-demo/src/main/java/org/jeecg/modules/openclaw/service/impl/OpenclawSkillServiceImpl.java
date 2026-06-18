@@ -52,6 +52,15 @@ import java.util.zip.ZipOutputStream;
 
 @Service
 public class OpenclawSkillServiceImpl extends ServiceImpl<OpenclawSkillMapper, OpenclawSkill> implements IOpenclawSkillService {
+    private static final Set<String> EDITABLE_SKILL_SCOPES = Set.of("private", "public");
+    private static final Set<String> EDITABLE_SKILL_STATUSES = Set.of(
+        OpenclawConstants.SKILL_STATUS_DRAFT,
+        OpenclawConstants.SKILL_STATUS_PRIVATE,
+        OpenclawConstants.SKILL_STATUS_APPROVED,
+        OpenclawConstants.SKILL_STATUS_REJECTED,
+        OpenclawConstants.SKILL_STATUS_DISABLED
+    );
+
     @Autowired
     private IOpenclawPermissionService permissionService;
     @Autowired
@@ -111,6 +120,40 @@ public class OpenclawSkillServiceImpl extends ServiceImpl<OpenclawSkillMapper, O
         skill.setDelFlag(OpenclawConstants.DEL_FLAG_NORMAL);
         save(skill);
         auditLogService.log("skill_studio_create", "skill", skill.getId(), skill);
+        return skill;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public OpenclawSkill updateSkillMetadata(OpenclawSkill request) {
+        if (request == null || !StringUtils.hasText(request.getId())) {
+            throw new JeecgBootException("Skill id is required");
+        }
+        OpenclawSkill skill = getById(request.getId());
+        if (skill == null || Integer.valueOf(OpenclawConstants.DEL_FLAG_DELETED).equals(skill.getDelFlag())) {
+            throw new JeecgBootException("Skill does not exist");
+        }
+        permissionService.checkOwnerOrAdmin(skill.getOwnerUserId());
+        validateSkillName(request.getName());
+        skill.setName(request.getName().trim());
+        skill.setDescription(trim(request.getDescription(), 1000));
+        skill.setRemark(trim(request.getRemark(), 1000));
+        if (permissionService.isAdmin(permissionService.currentUser())) {
+            if (StringUtils.hasText(request.getScope())) {
+                skill.setScope(normalizeSkillScope(request.getScope()));
+            }
+            if (StringUtils.hasText(request.getStatus())) {
+                String status = normalizeSkillStatus(request.getStatus());
+                if (!status.equals(skill.getStatus())
+                    && (OpenclawConstants.SKILL_STATUS_APPROVED.equals(status) || OpenclawConstants.SKILL_STATUS_REJECTED.equals(status))) {
+                    throw new JeecgBootException("Use the Skill review workflow to approve or reject Skills.");
+                }
+                skill.setStatus(status);
+            }
+        }
+        refreshSkillManifest(skill);
+        updateById(skill);
+        auditLogService.log("skill_update", "skill", skill.getId(), skill);
         return skill;
     }
 
@@ -346,6 +389,55 @@ public class OpenclawSkillServiceImpl extends ServiceImpl<OpenclawSkillMapper, O
         inspectSkillDirectory(result, skillPath);
         result.setPassed(result.getMissingFiles().isEmpty());
         return result;
+    }
+
+    private void validateSkillName(String name) {
+        if (!StringUtils.hasText(name)) {
+            throw new JeecgBootException("Skill name is required");
+        }
+        if (name.trim().length() > 100) {
+            throw new JeecgBootException("Skill name is too long, max length is 100");
+        }
+    }
+
+    private String normalizeSkillScope(String scope) {
+        String normalized = scope.trim().toLowerCase(Locale.ROOT);
+        if (!EDITABLE_SKILL_SCOPES.contains(normalized)) {
+            throw new JeecgBootException("Unsupported Skill scope: " + scope);
+        }
+        return normalized;
+    }
+
+    private String normalizeSkillStatus(String status) {
+        String normalized = status.trim().toLowerCase(Locale.ROOT);
+        if (!EDITABLE_SKILL_STATUSES.contains(normalized)) {
+            throw new JeecgBootException("Unsupported Skill status: " + status);
+        }
+        return normalized;
+    }
+
+    private void refreshSkillManifest(OpenclawSkill skill) {
+        if (!StringUtils.hasText(skill.getPath())) {
+            throw new JeecgBootException("Skill file path is empty");
+        }
+        Path skillPath = Paths.get(skill.getPath()).toAbsolutePath().normalize();
+        Path skillRoot = Paths.get(OpenclawConstants.SKILL_ROOT).toAbsolutePath().normalize();
+        if (!skillPath.startsWith(skillRoot)) {
+            throw new JeecgBootException("Skill file path is outside root: " + skill.getId());
+        }
+        if (!Files.exists(skillPath) || !Files.isDirectory(skillPath)) {
+            throw new JeecgBootException("Skill file directory does not exist.");
+        }
+        if (Files.isSymbolicLink(skillPath)) {
+            throw new JeecgBootException("Skill file directory must not be a symbolic link.");
+        }
+        try {
+            writeSkillManifest(skillPath, skill.getName(), skill.getSlug(), skill.getVersion(), skill.getDescription(), skill.getOwnerUsername());
+            skill.setChecksum(sha256Directory(skillPath));
+            skill.setFileSize(directorySize(skillPath));
+        } catch (IOException e) {
+            throw new JeecgBootException("Refresh Skill manifest failed: " + e.getMessage(), e);
+        }
     }
 
     private void validateUpload(MultipartFile file) {
