@@ -117,6 +117,8 @@ public class OpenclawWorkspaceServiceImpl extends ServiceImpl<OpenclawWorkspaceM
                 result.getErrors().add("Workspace path is not a directory");
             } else {
                 result.getCheckedItems().add("workspace directory");
+                checkReadable(root, "workspace directory", result);
+                checkWritable(root, "workspace directory", result);
             }
             checkRequiredFiles(root, result);
             checkRequiredDirs(root, result);
@@ -142,6 +144,7 @@ public class OpenclawWorkspaceServiceImpl extends ServiceImpl<OpenclawWorkspaceM
                 result.getErrors().add("Missing required file: " + file);
             } else {
                 result.getCheckedItems().add(file);
+                checkReadable(path, file, result);
             }
         }
     }
@@ -156,6 +159,8 @@ public class OpenclawWorkspaceServiceImpl extends ServiceImpl<OpenclawWorkspaceM
             } else {
                 workspaceMaterializer.ensureNoSymbolicLink(path);
                 result.getCheckedItems().add(dir + "/");
+                checkReadable(path, dir + "/", result);
+                checkWritable(path, dir + "/", result);
             }
         }
     }
@@ -185,7 +190,24 @@ public class OpenclawWorkspaceServiceImpl extends ServiceImpl<OpenclawWorkspaceM
                 result.getErrors().add("Bound skill files are missing: " + skill.getSlug());
             } else {
                 result.getCheckedItems().add("skills/" + skill.getSlug());
+                checkReadable(skillPath, "skills/" + skill.getSlug(), result);
             }
+        }
+    }
+
+    private void checkReadable(Path path, String label, OpenclawWorkspaceHealthCheckVO result) {
+        if (!Files.isReadable(path)) {
+            result.getErrors().add("Path is not readable: " + label);
+        } else {
+            result.getCheckedItems().add(label + " readable");
+        }
+    }
+
+    private void checkWritable(Path path, String label, OpenclawWorkspaceHealthCheckVO result) {
+        if (!Files.isWritable(path)) {
+            result.getErrors().add("Path is not writable: " + label);
+        } else {
+            result.getCheckedItems().add(label + " writable");
         }
     }
 
