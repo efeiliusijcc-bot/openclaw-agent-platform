@@ -58,6 +58,7 @@
       <a-descriptions v-else size="small" bordered :column="2">
         <a-descriptions-item label="Run ID">{{ health.latestFailedRun.id }}</a-descriptions-item>
         <a-descriptions-item label="Agent">{{ health.latestFailedRun.agentName }}</a-descriptions-item>
+        <a-descriptions-item label="Error Type" :span="2">{{ health.latestFailedRun.errorType || '-' }}</a-descriptions-item>
         <a-descriptions-item label="状态">{{ health.latestFailedRun.status }}</a-descriptions-item>
         <a-descriptions-item label="时间">{{ health.latestFailedRun.createTime }}</a-descriptions-item>
         <a-descriptions-item label="错误" :span="2">{{ health.latestFailedRun.errorMessage || '-' }}</a-descriptions-item>
@@ -107,6 +108,9 @@
       { label: 'Runs', value: s.runs || 0 },
       { label: 'Failed Runs', value: s.failedRuns || 0 },
       { label: 'Gateways', value: s.gateways || 0 },
+      { label: 'Error Agents', value: s.errorAgents || 0 },
+      { label: 'Error Workspaces', value: s.errorWorkspaces || 0 },
+      { label: 'Gateway Attention', value: s.gatewayAttention || 0 },
     ];
   });
 

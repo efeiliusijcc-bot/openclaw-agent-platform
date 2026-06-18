@@ -75,7 +75,7 @@ public class OpenclawSystemHealthServiceImpl implements IOpenclawSystemHealthSer
         health.getPaths().add(pathHealth("skillRoot", skillRoot, true));
         health.setGateways(gatewayHealth());
         health.setLatestFailedRun(latestFailedRun());
-        fillSummary(health.getSummary());
+        fillSummary(health.getSummary(), health.getGateways());
         health.setHealthy(isHealthy(health));
         return health;
     }
@@ -179,7 +179,7 @@ public class OpenclawSystemHealthServiceImpl implements IOpenclawSystemHealthSer
             .last("limit 1"));
     }
 
-    private void fillSummary(OpenclawSystemHealthVO.Summary summary) {
+    private void fillSummary(OpenclawSystemHealthVO.Summary summary, List<OpenclawSystemHealthVO.GatewayHealth> gateways) {
         summary.setAgents(agentMapper.selectCount(normalQuery(OpenclawAgent.class)));
         summary.setWorkspaces(workspaceMapper.selectCount(normalQuery(OpenclawWorkspace.class)));
         summary.setSkills(skillMapper.selectCount(normalQuery(OpenclawSkill.class)));
@@ -188,6 +188,15 @@ public class OpenclawSystemHealthServiceImpl implements IOpenclawSystemHealthSer
             .eq("del_flag", OpenclawConstants.DEL_FLAG_NORMAL)
             .in("status", OpenclawConstants.RUN_STATUS_FAILED, OpenclawConstants.RUN_STATUS_TIMEOUT)));
         summary.setGateways(gatewayNodeMapper.selectCount(normalQuery(OpenclawGatewayNode.class)));
+        summary.setErrorAgents(agentMapper.selectCount(new QueryWrapper<OpenclawAgent>()
+            .eq("del_flag", OpenclawConstants.DEL_FLAG_NORMAL)
+            .eq("status", OpenclawConstants.AGENT_STATUS_ERROR)));
+        summary.setErrorWorkspaces(workspaceMapper.selectCount(new QueryWrapper<OpenclawWorkspace>()
+            .eq("del_flag", OpenclawConstants.DEL_FLAG_NORMAL)
+            .eq("status", OpenclawConstants.WORKSPACE_STATUS_ERROR)));
+        summary.setGatewayAttention(gateways.stream()
+            .filter(item -> !STATUS_UP.equals(item.getHealthStatus()))
+            .count());
     }
 
     private <T> QueryWrapper<T> normalQuery(Class<T> ignored) {

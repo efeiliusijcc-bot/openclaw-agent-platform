@@ -27,6 +27,9 @@ public class OpenclawSystemHealthVO {
         private Long runs;
         private Long failedRuns;
         private Long gateways;
+        private Long errorAgents;
+        private Long errorWorkspaces;
+        private Long gatewayAttention;
     }
 
     @Data
