@@ -260,6 +260,12 @@ public class OpenclawGatewayConfigServiceImpl implements IOpenclawGatewayConfigS
                 throw new JeecgBootException("Workspace root does not exist: " + workspaceRoot);
             }
             workspaceMaterializer.ensureNoSymbolicLink(root);
+            if (!Files.isReadable(root)) {
+                throw new JeecgBootException("Workspace root is not readable: " + workspaceRoot);
+            }
+            if (!Files.isWritable(root)) {
+                throw new JeecgBootException("Workspace root is not writable: " + workspaceRoot);
+            }
         } catch (IOException e) {
             throw new JeecgBootException("Workspace root is not writable: " + workspaceRoot, e);
         }
