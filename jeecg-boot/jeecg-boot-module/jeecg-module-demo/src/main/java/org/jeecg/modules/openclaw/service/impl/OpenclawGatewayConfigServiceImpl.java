@@ -65,6 +65,7 @@ public class OpenclawGatewayConfigServiceImpl implements IOpenclawGatewayConfigS
         OpenclawGatewayNode node = requireNode(gatewayId);
         precheckNode(node);
         RenderedConfig rendered = render(node, false);
+        precheckCapacity(node, rendered);
         return toResult(node, rendered, "Gateway config preview generated", true);
     }
 
@@ -76,6 +77,7 @@ public class OpenclawGatewayConfigServiceImpl implements IOpenclawGatewayConfigS
             auditLogService.logSuccess("gateway_sync_start", "gateway", node.getId(), syncStartDetail(node));
             precheckNode(node);
             RenderedConfig rendered = render(node, true);
+            precheckCapacity(node, rendered);
             PublishResult publishResult = writeConfig(configPath(node), rendered);
             backup = publishResult.backup;
             node.setConfigPath(configPath(node));
@@ -154,7 +156,7 @@ public class OpenclawGatewayConfigServiceImpl implements IOpenclawGatewayConfigS
         RenderedConfig rendered = new RenderedConfig();
         rendered.content = content + System.lineSeparator();
         rendered.previewContent = previewContent + System.lineSeparator();
-        rendered.agentCount = agents.size();
+        rendered.agentCount = renderedAgentIds.size();
         rendered.skillCount = uniqueSkills.size();
         rendered.agentIds = renderedAgentIds;
         rendered.checksum = sha256(rendered.content);
@@ -180,7 +182,7 @@ public class OpenclawGatewayConfigServiceImpl implements IOpenclawGatewayConfigS
     }
 
     private void precheckNode(OpenclawGatewayNode node) {
-        if ("disabled".equalsIgnoreCase(node.getStatus()) || OpenclawConstants.STATUS_DISABLED.equalsIgnoreCase(node.getStatus())) {
+        if (OpenclawConstants.GATEWAY_STATUS_DISABLED.equalsIgnoreCase(node.getStatus())) {
             throw new JeecgBootException("Gateway node is disabled: " + node.getId());
         }
         Path config = configPathAsPath(node);
@@ -191,6 +193,12 @@ public class OpenclawGatewayConfigServiceImpl implements IOpenclawGatewayConfigS
         }
         if (Files.exists(parent) && !Files.isDirectory(parent)) {
             throw new JeecgBootException("Gateway config parent is not a directory: " + parent);
+        }
+    }
+
+    private void precheckCapacity(OpenclawGatewayNode node, RenderedConfig rendered) {
+        if (node.getMaxAgents() != null && node.getMaxAgents() > 0 && rendered.agentCount > node.getMaxAgents()) {
+            throw new JeecgBootException("Gateway agent capacity exceeded: " + rendered.agentCount + "/" + node.getMaxAgents());
         }
     }
 
