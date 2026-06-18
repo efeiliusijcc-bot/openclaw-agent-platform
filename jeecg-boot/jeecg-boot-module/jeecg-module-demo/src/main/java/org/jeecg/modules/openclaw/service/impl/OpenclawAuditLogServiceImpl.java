@@ -11,6 +11,8 @@ import org.jeecg.modules.openclaw.entity.OpenclawAuditLog;
 import org.jeecg.modules.openclaw.mapper.OpenclawAuditLogMapper;
 import org.jeecg.modules.openclaw.service.IOpenclawAuditLogService;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
@@ -29,6 +31,7 @@ public class OpenclawAuditLogServiceImpl extends ServiceImpl<OpenclawAuditLogMap
     }
 
     @Override
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void logFailure(String action, String targetType, String targetId, Object detail) {
         doLog(action, OpenclawConstants.AUDIT_RESULT_FAILED, targetType, targetId, detail);
     }

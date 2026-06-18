@@ -1,5 +1,6 @@
 package org.jeecg.modules.openclaw.service.impl;
 
+import com.alibaba.fastjson.JSONObject;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import org.jeecg.common.exception.JeecgBootException;
 import org.jeecg.modules.openclaw.constant.OpenclawConstants;
@@ -35,6 +36,15 @@ public class OpenclawAgentSkillServiceImpl extends ServiceImpl<OpenclawAgentSkil
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void bindSkill(String agentId, String skillId) {
+        try {
+            doBindSkill(agentId, skillId);
+        } catch (RuntimeException e) {
+            auditSkillBindingFailure("agent_bind_skill", agentId, skillId, e);
+            throw e;
+        }
+    }
+
+    private void doBindSkill(String agentId, String skillId) {
         OpenclawAgent agent = requireAgent(agentId);
         OpenclawSkill skill = requireBindableSkill(agent, skillId);
         permissionService.checkOwnerOrAdmin(agent.getUserId());
@@ -71,6 +81,15 @@ public class OpenclawAgentSkillServiceImpl extends ServiceImpl<OpenclawAgentSkil
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void unbindSkill(String agentId, String skillId) {
+        try {
+            doUnbindSkill(agentId, skillId);
+        } catch (RuntimeException e) {
+            auditSkillBindingFailure("agent_unbind_skill", agentId, skillId, e);
+            throw e;
+        }
+    }
+
+    private void doUnbindSkill(String agentId, String skillId) {
         OpenclawAgent agent = requireAgent(agentId);
         permissionService.checkOwnerOrAdmin(agent.getUserId());
         OpenclawAgentSkill binding = lambdaQuery()
@@ -87,6 +106,19 @@ public class OpenclawAgentSkillServiceImpl extends ServiceImpl<OpenclawAgentSkil
         OpenclawSkill skill = skillMapper.selectById(skillId);
         skillMaterializer.removeSkillFromAgent(agent, skill);
         auditLogService.log("agent_unbind_skill", "agent_skill", binding.getId(), binding);
+    }
+
+    private void auditSkillBindingFailure(String action, String agentId, String skillId, RuntimeException e) {
+        try {
+            JSONObject detail = new JSONObject();
+            detail.put("agentId", agentId);
+            detail.put("skillId", skillId);
+            detail.put("errorType", e.getClass().getSimpleName());
+            detail.put("errorMessage", e.getMessage());
+            auditLogService.logFailure(action, "agent_skill", agentId + ":" + skillId, detail);
+        } catch (Exception ignored) {
+            // Audit failures must not hide the original binding error.
+        }
     }
 
     @Override
