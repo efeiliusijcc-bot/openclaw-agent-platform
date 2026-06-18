@@ -1,5 +1,6 @@
 package org.jeecg.modules.openclaw.controller;
 
+import com.alibaba.fastjson.JSONObject;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -10,6 +11,7 @@ import org.jeecg.common.api.vo.Result;
 import org.jeecg.common.system.query.QueryGenerator;
 import org.jeecg.modules.openclaw.constant.OpenclawConstants;
 import org.jeecg.modules.openclaw.entity.OpenclawGatewayNode;
+import org.jeecg.modules.openclaw.service.IOpenclawAuditLogService;
 import org.jeecg.modules.openclaw.service.IOpenclawGatewayConfigService;
 import org.jeecg.modules.openclaw.service.IOpenclawGatewayNodeService;
 import org.jeecg.modules.openclaw.vo.OpenclawGatewaySyncResultVO;
@@ -33,6 +35,8 @@ public class OpenclawGatewayNodeController {
     private IOpenclawGatewayNodeService gatewayNodeService;
     @Autowired
     private IOpenclawGatewayConfigService gatewayConfigService;
+    @Autowired
+    private IOpenclawAuditLogService auditLogService;
 
     @GetMapping("/list")
     @RequiresPermissions("openclaw:gateway:list")
@@ -55,6 +59,7 @@ public class OpenclawGatewayNodeController {
         fillGatewayDefaults(node);
         node.setDelFlag(OpenclawConstants.DEL_FLAG_NORMAL);
         gatewayNodeService.save(node);
+        auditLogService.logSuccess("gateway_node_add", "gateway", node.getId(), gatewayAuditDetail(node));
         return Result.OK("新增成功");
     }
 
@@ -63,6 +68,7 @@ public class OpenclawGatewayNodeController {
     public Result<?> edit(@RequestBody OpenclawGatewayNode node) {
         fillGatewayDefaults(node);
         gatewayNodeService.updateById(node);
+        auditLogService.logSuccess("gateway_node_edit", "gateway", node.getId(), gatewayAuditDetail(node));
         return Result.OK("更新成功");
     }
 
@@ -70,6 +76,9 @@ public class OpenclawGatewayNodeController {
     @RequiresPermissions("openclaw:gateway:disable")
     public Result<?> delete(@RequestParam String id) {
         gatewayNodeService.logicDeleteNode(id);
+        JSONObject detail = new JSONObject();
+        detail.put("gatewayId", id);
+        auditLogService.logSuccess("gateway_node_disable", "gateway", id, detail);
         return Result.OK("删除成功");
     }
 
@@ -95,5 +104,16 @@ public class OpenclawGatewayNodeController {
         if (node.getRestartRequired() == null) {
             node.setRestartRequired(1);
         }
+    }
+
+    private JSONObject gatewayAuditDetail(OpenclawGatewayNode node) {
+        JSONObject detail = new JSONObject();
+        detail.put("gatewayId", node.getId());
+        detail.put("name", node.getName());
+        detail.put("baseUrl", node.getBaseUrl());
+        detail.put("status", node.getStatus());
+        detail.put("configPath", node.getConfigPath());
+        detail.put("workspaceRoot", node.getWorkspaceRoot());
+        return detail;
     }
 }

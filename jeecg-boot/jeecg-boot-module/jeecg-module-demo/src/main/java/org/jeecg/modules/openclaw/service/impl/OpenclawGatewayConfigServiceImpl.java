@@ -73,6 +73,7 @@ public class OpenclawGatewayConfigServiceImpl implements IOpenclawGatewayConfigS
         OpenclawGatewayNode node = requireNode(gatewayId);
         Path backup = null;
         try {
+            auditLogService.logSuccess("gateway_sync_start", "gateway", node.getId(), syncStartDetail(node));
             precheckNode(node);
             RenderedConfig rendered = render(node, true);
             PublishResult publishResult = writeConfig(configPath(node), rendered);
@@ -338,6 +339,17 @@ public class OpenclawGatewayConfigServiceImpl implements IOpenclawGatewayConfigS
         detail.put("checksum", result.getChecksum());
         detail.put("restartRequired", result.getRestartRequired());
         detail.put("message", result.getMessage());
+        return detail;
+    }
+
+    private JSONObject syncStartDetail(OpenclawGatewayNode node) {
+        JSONObject detail = new JSONObject(true);
+        detail.put("gatewayId", node.getId());
+        detail.put("name", node.getName());
+        detail.put("configPath", configPath(node));
+        detail.put("workspaceRoot", workspaceRoot(node));
+        detail.put("previousLastSyncStatus", node.getLastSyncStatus());
+        detail.put("previousLastSyncTime", node.getLastSyncTime());
         return detail;
     }
 
