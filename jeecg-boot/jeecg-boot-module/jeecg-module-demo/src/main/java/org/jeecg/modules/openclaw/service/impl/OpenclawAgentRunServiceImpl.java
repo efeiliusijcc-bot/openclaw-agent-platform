@@ -467,6 +467,7 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
         if (!StringUtils.hasText(gateway.getBaseUrl())) {
             throw new JeecgBootException("OpenClaw Gateway base URL is empty");
         }
+        normalizeGatewayBaseUrl(gateway.getBaseUrl());
         if (!OpenclawConstants.RUN_STATUS_SUCCESS.equals(gateway.getLastSyncStatus())) {
             throw new JeecgBootException("OpenClaw Gateway config is not synced successfully: " + firstText(gateway.getLastSyncMessage(), gateway.getLastSyncStatus()));
         }
@@ -614,10 +615,32 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
         if (!StringUtils.hasText(baseUrl)) {
             throw new JeecgBootException("OpenClaw Gateway base URL is empty");
         }
+        baseUrl = normalizeGatewayBaseUrl(baseUrl);
         while (baseUrl.endsWith("/")) {
             baseUrl = baseUrl.substring(0, baseUrl.length() - 1);
         }
         return baseUrl;
+    }
+
+    private String normalizeGatewayBaseUrl(String baseUrl) {
+        String value = baseUrl.trim();
+        URI uri;
+        try {
+            uri = URI.create(value);
+        } catch (IllegalArgumentException e) {
+            throw new JeecgBootException("OpenClaw Gateway base URL is invalid: " + value, e);
+        }
+        String scheme = uri.getScheme();
+        if (!"http".equalsIgnoreCase(scheme)
+            && !"https".equalsIgnoreCase(scheme)
+            && !"ws".equalsIgnoreCase(scheme)
+            && !"wss".equalsIgnoreCase(scheme)) {
+            throw new JeecgBootException("OpenClaw Gateway base URL must use http, https, ws or wss");
+        }
+        if (!StringUtils.hasText(uri.getHost())) {
+            throw new JeecgBootException("OpenClaw Gateway base URL must include host");
+        }
+        return value;
     }
 
     private String readStream(InputStream inputStream) {
