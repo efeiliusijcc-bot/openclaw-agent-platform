@@ -30,6 +30,7 @@ import java.util.List;
 public class OpenclawWorkspaceServiceImpl extends ServiceImpl<OpenclawWorkspaceMapper, OpenclawWorkspace> implements IOpenclawWorkspaceService {
     private static final List<String> REQUIRED_FILES = List.of("AGENTS.md", "USER.md", "IDENTITY.md");
     private static final List<String> REQUIRED_DIRS = List.of("skills", "files", "logs", "output");
+    private static final long MB = 1024L * 1024L;
 
     @Autowired
     private IOpenclawPermissionService permissionService;
@@ -131,10 +132,45 @@ public class OpenclawWorkspaceServiceImpl extends ServiceImpl<OpenclawWorkspaceM
     }
 
     private void updateWorkspaceHealthStatus(OpenclawWorkspace workspace, OpenclawWorkspaceHealthCheckVO result) {
+        updateWorkspaceUsage(workspace, result);
         workspace.setStatus(result.isHealthy() ? OpenclawConstants.WORKSPACE_STATUS_READY : OpenclawConstants.WORKSPACE_STATUS_ERROR);
         workspace.setRemark(result.isHealthy() ? null : String.join("; ", result.getErrors()));
         updateById(workspace);
         result.setStatus(workspace.getStatus());
+    }
+
+    private void updateWorkspaceUsage(OpenclawWorkspace workspace, OpenclawWorkspaceHealthCheckVO result) {
+        if (result.getErrors().contains("Workspace directory is missing")
+            || result.getErrors().contains("Workspace path is not a directory")) {
+            return;
+        }
+        try {
+            Path root = workspaceMaterializer.safeWorkspacePath(workspace.getPath());
+            if (!Files.exists(root) || !Files.isDirectory(root) || Files.isSymbolicLink(root)) {
+                return;
+            }
+            long bytes = directorySize(root);
+            int usedMb = Math.toIntExact(Math.min(Integer.MAX_VALUE, (bytes + MB - 1) / MB));
+            workspace.setUsedSizeMb(usedMb);
+            if (workspace.getQuotaSizeMb() != null && usedMb > workspace.getQuotaSizeMb()) {
+                result.getWarnings().add("Workspace usage exceeds quota: " + usedMb + "MB/" + workspace.getQuotaSizeMb() + "MB");
+            }
+            result.getCheckedItems().add("workspace usage " + usedMb + "MB");
+        } catch (Exception e) {
+            result.getWarnings().add("Failed to calculate workspace usage: " + e.getMessage());
+        }
+    }
+
+    private long directorySize(Path root) throws IOException {
+        try (var walk = Files.walk(root)) {
+            long total = 0L;
+            for (Path path : walk.filter(Files::isRegularFile).toList()) {
+                if (!Files.isSymbolicLink(path)) {
+                    total += Files.size(path);
+                }
+            }
+            return total;
+        }
     }
 
     private void checkRequiredFiles(Path root, OpenclawWorkspaceHealthCheckVO result) {
