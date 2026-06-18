@@ -39,6 +39,8 @@ public class OpenclawWorkspaceServiceImpl extends ServiceImpl<OpenclawWorkspaceM
     @Autowired
     private OpenclawWorkspaceMaterializer workspaceMaterializer;
     @Autowired
+    private OpenclawSkillMaterializer skillMaterializer;
+    @Autowired
     private OpenclawAgentMapper agentMapper;
     @Autowired
     private OpenclawAgentSkillMapper agentSkillMapper;
@@ -88,7 +90,7 @@ public class OpenclawWorkspaceServiceImpl extends ServiceImpl<OpenclawWorkspaceM
         OpenclawWorkspace workspace = requireWorkspace(workspaceId);
         permissionService.checkOwnerOrAdmin(workspace.getUserId());
         OpenclawAgent agent = requireAgent(workspace.getId());
-        workspaceMaterializer.materialize(agent, workspace);
+        skillMaterializer.materializeAgentSkills(agent);
         OpenclawWorkspaceHealthCheckVO result = inspect(workspace);
         updateWorkspaceHealthStatus(workspace, result);
         auditWorkspaceResult("workspace_rematerialize", workspace, result);
@@ -224,6 +226,8 @@ public class OpenclawWorkspaceServiceImpl extends ServiceImpl<OpenclawWorkspaceM
             Path skillPath = skillsRoot.resolve(skill.getSlug()).normalize();
             if (!skillPath.startsWith(skillsRoot) || !Files.isDirectory(skillPath)) {
                 result.getErrors().add("Bound skill files are missing: " + skill.getSlug());
+            } else if (Files.isSymbolicLink(skillPath)) {
+                result.getErrors().add("Bound skill path must not be symbolic link: " + skill.getSlug());
             } else {
                 result.getCheckedItems().add("skills/" + skill.getSlug());
                 checkReadable(skillPath, "skills/" + skill.getSlug(), result);
