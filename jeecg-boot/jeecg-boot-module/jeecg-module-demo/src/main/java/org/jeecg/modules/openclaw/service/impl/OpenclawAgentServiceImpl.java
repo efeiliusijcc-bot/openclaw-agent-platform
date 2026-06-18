@@ -112,6 +112,7 @@ public class OpenclawAgentServiceImpl extends ServiceImpl<OpenclawAgentMapper, O
         agent.setMaxDailyRuns(dto.getMaxDailyRuns());
         agent.setConfigJson(dto.getConfigJson());
         agent.setRemark(dto.getRemark());
+        clearGatewayAssignment(agent);
         updateById(agent);
         workspaceMaterializer.materialize(agent, workspaceService.getById(agent.getWorkspaceId()));
         auditLogService.log("agent_update", "agent", agent.getId(), agent);
@@ -127,6 +128,7 @@ public class OpenclawAgentServiceImpl extends ServiceImpl<OpenclawAgentMapper, O
         permissionService.checkOwnerOrAdmin(agent.getUserId());
         agent.setStatus(OpenclawConstants.AGENT_STATUS_DELETED);
         agent.setDelFlag(OpenclawConstants.DEL_FLAG_DELETED);
+        clearGatewayAssignment(agent);
         updateById(agent);
         agentSkillService.disableByAgent(agent.getId());
         workspaceService.markDeleted(agent.getWorkspaceId());
@@ -143,12 +145,23 @@ public class OpenclawAgentServiceImpl extends ServiceImpl<OpenclawAgentMapper, O
             throw new JeecgBootException("只有 OpenClaw 管理员可以禁用 Agent");
         }
         agent.setStatus(OpenclawConstants.AGENT_STATUS_DISABLED);
+        clearGatewayAssignment(agent);
         updateById(agent);
         auditLogService.log("agent_disable", "agent", agent.getId(), agent);
     }
 
     private String generateAgentKey() {
         return "agt_" + IdWorker.getIdStr();
+    }
+
+    private void clearGatewayAssignment(OpenclawAgent agent) {
+        if (agent != null && StringUtils.hasText(agent.getGatewayId())) {
+            agent.setGatewayId(null);
+            lambdaUpdate()
+                .eq(OpenclawAgent::getId, agent.getId())
+                .set(OpenclawAgent::getGatewayId, null)
+                .update();
+        }
     }
 
     private void markAgentCreateFailed(OpenclawAgent agent, OpenclawWorkspace workspace, RuntimeException e) {
