@@ -145,8 +145,9 @@ public class OpenclawAgentSkillServiceImpl extends ServiceImpl<OpenclawAgentSkil
         if (agent == null || Integer.valueOf(OpenclawConstants.DEL_FLAG_DELETED).equals(agent.getDelFlag())) {
             throw new JeecgBootException("Agent 不存在");
         }
-        if (OpenclawConstants.AGENT_STATUS_DISABLED.equals(agent.getStatus())) {
-            throw new JeecgBootException("已禁用 Agent 不能绑定或解绑 Skill");
+        if (!OpenclawConstants.AGENT_STATUS_DRAFT.equals(agent.getStatus())
+            && !OpenclawConstants.AGENT_STATUS_ENABLED.equals(agent.getStatus())) {
+            throw new JeecgBootException("Agent status does not allow skill binding: " + agent.getStatus());
         }
         return agent;
     }

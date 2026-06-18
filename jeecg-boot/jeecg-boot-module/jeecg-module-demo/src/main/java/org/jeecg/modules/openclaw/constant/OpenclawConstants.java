@@ -16,7 +16,10 @@ public final class OpenclawConstants {
     public static final String AUDIT_RESULT_FAILED = "failed";
 
     public static final String AGENT_STATUS_DRAFT = "draft";
+    public static final String AGENT_STATUS_ENABLED = "enabled";
     public static final String AGENT_STATUS_DISABLED = "disabled";
+    public static final String AGENT_STATUS_ERROR = "error";
+    public static final String AGENT_STATUS_DELETED = "deleted";
 
     public static final String WORKSPACE_STATUS_ACTIVE = "active";
     public static final String WORKSPACE_STATUS_DELETED = "deleted";

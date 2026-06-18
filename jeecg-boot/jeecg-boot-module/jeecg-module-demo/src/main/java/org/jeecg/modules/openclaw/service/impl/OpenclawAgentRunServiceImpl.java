@@ -409,8 +409,8 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
         if (agent == null || Integer.valueOf(OpenclawConstants.DEL_FLAG_DELETED).equals(agent.getDelFlag())) {
             throw new JeecgBootException("Agent does not exist");
         }
-        if (OpenclawConstants.AGENT_STATUS_DISABLED.equals(agent.getStatus())) {
-            throw new JeecgBootException("Agent is disabled");
+        if (!OpenclawConstants.AGENT_STATUS_ENABLED.equals(agent.getStatus())) {
+            throw new JeecgBootException("Agent is not enabled: " + agent.getStatus());
         }
         if (!StringUtils.hasText(agent.getAgentKey())) {
             throw new JeecgBootException("Agent key is empty; sync the agent to OpenClaw Gateway first");

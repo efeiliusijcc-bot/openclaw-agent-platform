@@ -112,7 +112,7 @@ public class OpenclawGatewayConfigServiceImpl implements IOpenclawGatewayConfigS
 
         List<OpenclawAgent> agents = agentMapper.selectList(new LambdaQueryWrapper<OpenclawAgent>()
             .eq(OpenclawAgent::getDelFlag, OpenclawConstants.DEL_FLAG_NORMAL)
-            .ne(OpenclawAgent::getStatus, OpenclawConstants.AGENT_STATUS_DISABLED));
+            .eq(OpenclawAgent::getStatus, OpenclawConstants.AGENT_STATUS_ENABLED));
         agents.sort(Comparator.comparing(OpenclawAgent::getAgentKey, Comparator.nullsLast(String::compareTo)));
 
         for (OpenclawAgent agent : agents) {

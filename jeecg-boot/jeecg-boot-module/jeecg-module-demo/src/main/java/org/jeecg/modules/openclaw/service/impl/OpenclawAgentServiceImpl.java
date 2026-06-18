@@ -22,8 +22,17 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.util.Set;
+
 @Service
 public class OpenclawAgentServiceImpl extends ServiceImpl<OpenclawAgentMapper, OpenclawAgent> implements IOpenclawAgentService {
+    private static final Set<String> EDITABLE_AGENT_STATUSES = Set.of(
+        OpenclawConstants.AGENT_STATUS_DRAFT,
+        OpenclawConstants.AGENT_STATUS_ENABLED,
+        OpenclawConstants.AGENT_STATUS_DISABLED,
+        OpenclawConstants.AGENT_STATUS_ERROR
+    );
+
     @Autowired
     private IOpenclawPermissionService permissionService;
     @Autowired
@@ -87,7 +96,7 @@ public class OpenclawAgentServiceImpl extends ServiceImpl<OpenclawAgentMapper, O
         agent.setName(dto.getName());
         agent.setDescription(dto.getDescription());
         if (StringUtils.hasText(dto.getStatus())) {
-            agent.setStatus(dto.getStatus());
+            agent.setStatus(normalizeEditableStatus(dto.getStatus()));
         }
         agent.setMaxSkills(dto.getMaxSkills());
         agent.setMaxDailyRuns(dto.getMaxDailyRuns());
@@ -106,7 +115,7 @@ public class OpenclawAgentServiceImpl extends ServiceImpl<OpenclawAgentMapper, O
             return;
         }
         permissionService.checkOwnerOrAdmin(agent.getUserId());
-        agent.setStatus(OpenclawConstants.AGENT_STATUS_DISABLED);
+        agent.setStatus(OpenclawConstants.AGENT_STATUS_DELETED);
         agent.setDelFlag(OpenclawConstants.DEL_FLAG_DELETED);
         updateById(agent);
         agentSkillService.disableByAgent(agent.getId());
@@ -130,5 +139,16 @@ public class OpenclawAgentServiceImpl extends ServiceImpl<OpenclawAgentMapper, O
 
     private String generateAgentKey() {
         return "agt_" + IdWorker.getIdStr();
+    }
+
+    private String normalizeEditableStatus(String status) {
+        String normalized = status.trim().toLowerCase();
+        if ("active".equals(normalized)) {
+            normalized = OpenclawConstants.AGENT_STATUS_ENABLED;
+        }
+        if (!EDITABLE_AGENT_STATUSES.contains(normalized)) {
+            throw new JeecgBootException("Unsupported Agent status: " + status);
+        }
+        return normalized;
     }
 }
