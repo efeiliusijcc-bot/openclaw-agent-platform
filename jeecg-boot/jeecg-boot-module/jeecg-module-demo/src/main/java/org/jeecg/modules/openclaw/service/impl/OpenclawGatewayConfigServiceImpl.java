@@ -235,12 +235,19 @@ public class OpenclawGatewayConfigServiceImpl implements IOpenclawGatewayConfigS
             if (skill == null || Integer.valueOf(OpenclawConstants.DEL_FLAG_DELETED).equals(skill.getDelFlag())) {
                 throw new JeecgBootException("Bound skill does not exist: " + binding.getSkillId());
             }
-            if (!OpenclawConstants.STATUS_DISABLED.equals(skill.getStatus())) {
-                skills.add(skill);
+            if (!isRunnableSkill(skill)) {
+                throw new JeecgBootException("Bound skill status does not allow gateway sync: "
+                    + skill.getSlug() + ", status=" + skill.getStatus());
             }
+            skills.add(skill);
         }
         skills.sort(Comparator.comparing(OpenclawSkill::getSlug, Comparator.nullsLast(String::compareTo)));
         return skills;
+    }
+
+    private boolean isRunnableSkill(OpenclawSkill skill) {
+        return OpenclawConstants.SKILL_STATUS_APPROVED.equals(skill.getStatus())
+            || OpenclawConstants.SKILL_STATUS_PRIVATE.equals(skill.getStatus());
     }
 
     private void ensureWorkspaceRoot(String workspaceRoot, boolean createIfMissing) {
