@@ -3,6 +3,7 @@ package org.jeecg.modules.openclaw.service.impl;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import org.jeecg.common.exception.JeecgBootException;
 import org.jeecg.common.system.vo.LoginUser;
@@ -90,11 +91,13 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
         Date startTime = new Date();
         OpenclawAgentRun run = createQueuedRun(user, agent, prompt, startTime);
         save(run);
+        boolean gatewayRunningTracked = false;
 
         try {
             precheckRunForExecution(agent);
             checkRunQuotaForExecution(user, agent, run.getId());
-            markRunRunning(run);
+            markRunRunning(run, agent);
+            gatewayRunningTracked = true;
             CliResult result = executeCli(agent.getAgentKey(), prompt);
             Date finishTime = new Date();
             run.setFinishTime(finishTime);
@@ -126,6 +129,10 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
             updateById(run);
             auditLogService.logFailure("agent_run_test", "agent_run", run.getId(), toResult(run, agent));
             return toResult(run, agent);
+        } finally {
+            if (gatewayRunningTracked) {
+                decrementGatewayRunning(agent);
+            }
         }
     }
 
@@ -146,6 +153,7 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
         OpenclawAgentRun run = null;
         Date startTime = new Date();
         String output = "";
+        boolean gatewayRunningTracked = false;
         try {
             String model = "openclaw/" + agent.getAgentKey();
             run = createQueuedRun(user, agent, prompt, startTime);
@@ -157,7 +165,8 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
 
             precheckRunForExecution(agent);
             checkRunQuotaForExecution(user, agent, run.getId());
-            markRunRunning(run);
+            markRunRunning(run, agent);
+            gatewayRunningTracked = true;
             sendEvent(emitter, "run_created", streamPayload(run, agent, null, null));
             output = executeGatewayStream(agent, model, prompt, conversationId, emitter);
             finishRun(run, startTime, OpenclawConstants.RUN_STATUS_SUCCESS, output, null);
@@ -174,6 +183,10 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
             finishFailedStreamRun(run, startTime, OpenclawConstants.RUN_STATUS_TIMEOUT, e.getMessage(), agent, emitter, "timeout");
         } catch (Exception e) {
             finishFailedStreamRun(run, startTime, OpenclawConstants.RUN_STATUS_FAILED, e, agent, emitter, "error");
+        } finally {
+            if (gatewayRunningTracked) {
+                decrementGatewayRunning(agent);
+            }
         }
     }
 
@@ -489,6 +502,13 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
         if (!OpenclawConstants.RUN_STATUS_SUCCESS.equals(gateway.getLastSyncStatus())) {
             throw new JeecgBootException("OpenClaw Gateway config is not synced successfully: " + firstText(gateway.getLastSyncMessage(), gateway.getLastSyncStatus()));
         }
+        int currentRunning = gateway.getCurrentRunning() == null ? 0 : gateway.getCurrentRunning();
+        if (gateway.getMaxConcurrentRuns() != null
+            && gateway.getMaxConcurrentRuns() > 0
+            && currentRunning >= gateway.getMaxConcurrentRuns()) {
+            throw new JeecgBootException("OpenClaw Gateway concurrent run capacity exceeded: "
+                + currentRunning + "/" + gateway.getMaxConcurrentRuns());
+        }
     }
 
     private Path normalizePath(String value, String errorMessage) {
@@ -570,9 +590,30 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
         return run;
     }
 
-    private void markRunRunning(OpenclawAgentRun run) {
+    private void markRunRunning(OpenclawAgentRun run, OpenclawAgent agent) {
         run.setStatus(OpenclawConstants.RUN_STATUS_RUNNING);
         updateById(run);
+        incrementGatewayRunning(agent);
+    }
+
+    private void incrementGatewayRunning(OpenclawAgent agent) {
+        if (agent == null || !StringUtils.hasText(agent.getGatewayId())) {
+            return;
+        }
+        gatewayNodeMapper.update(null, new LambdaUpdateWrapper<OpenclawGatewayNode>()
+            .eq(OpenclawGatewayNode::getId, agent.getGatewayId())
+            .eq(OpenclawGatewayNode::getDelFlag, OpenclawConstants.DEL_FLAG_NORMAL)
+            .setSql("current_running = COALESCE(current_running, 0) + 1"));
+    }
+
+    private void decrementGatewayRunning(OpenclawAgent agent) {
+        if (agent == null || !StringUtils.hasText(agent.getGatewayId())) {
+            return;
+        }
+        gatewayNodeMapper.update(null, new LambdaUpdateWrapper<OpenclawGatewayNode>()
+            .eq(OpenclawGatewayNode::getId, agent.getGatewayId())
+            .eq(OpenclawGatewayNode::getDelFlag, OpenclawConstants.DEL_FLAG_NORMAL)
+            .setSql("current_running = GREATEST(COALESCE(current_running, 0) - 1, 0)"));
     }
 
     private CliResult executeCli(String agentKey, String prompt) throws Exception {
