@@ -5,6 +5,7 @@ import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import com.alibaba.fastjson.serializer.SerializerFeature;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.toolkit.IdWorker;
 import org.jeecg.common.exception.JeecgBootException;
 import org.jeecg.modules.openclaw.constant.OpenclawConstants;
@@ -89,9 +90,9 @@ public class OpenclawGatewayConfigServiceImpl implements IOpenclawGatewayConfigS
             node.setLastSyncChecksum(rendered.checksum);
             node.setRestartRequired(1);
             gatewayNodeMapper.updateById(node);
-            bindAgentsToGateway(rendered.agentIds, node.getId());
+            int staleBindings = reconcileAgentGatewayBindings(rendered.agentIds, node.getId());
             OpenclawGatewaySyncResultVO result = toResult(node, rendered, "Config atomically written. Restart OpenClaw Gateway manually.", false);
-            auditLogService.logSuccess("gateway_sync", "gateway", node.getId(), syncAuditDetail(result, "success"));
+            auditLogService.logSuccess("gateway_sync", "gateway", node.getId(), syncAuditDetail(result, "success", staleBindings));
             return result;
         } catch (Exception e) {
             restoreBackup(configPath(node), backup);
@@ -164,13 +165,21 @@ public class OpenclawGatewayConfigServiceImpl implements IOpenclawGatewayConfigS
         return rendered;
     }
 
-    private void bindAgentsToGateway(List<String> agentIds, String gatewayId) {
+    private int reconcileAgentGatewayBindings(List<String> agentIds, String gatewayId) {
         for (String agentId : agentIds) {
             OpenclawAgent update = new OpenclawAgent();
             update.setId(agentId);
             update.setGatewayId(gatewayId);
             agentMapper.updateById(update);
         }
+        LambdaUpdateWrapper<OpenclawAgent> staleWrapper = new LambdaUpdateWrapper<OpenclawAgent>()
+            .eq(OpenclawAgent::getGatewayId, gatewayId)
+            .eq(OpenclawAgent::getDelFlag, OpenclawConstants.DEL_FLAG_NORMAL)
+            .set(OpenclawAgent::getGatewayId, null);
+        if (!agentIds.isEmpty()) {
+            staleWrapper.notIn(OpenclawAgent::getId, agentIds);
+        }
+        return agentMapper.update(null, staleWrapper);
     }
 
     private OpenclawGatewayNode requireNode(String gatewayId) {
@@ -365,7 +374,7 @@ public class OpenclawGatewayConfigServiceImpl implements IOpenclawGatewayConfigS
         return detail;
     }
 
-    private JSONObject syncAuditDetail(OpenclawGatewaySyncResultVO result, String status) {
+    private JSONObject syncAuditDetail(OpenclawGatewaySyncResultVO result, String status, int staleBindings) {
         JSONObject detail = new JSONObject(true);
         detail.put("status", status);
         detail.put("gatewayId", result.getGatewayId());
@@ -376,6 +385,7 @@ public class OpenclawGatewayConfigServiceImpl implements IOpenclawGatewayConfigS
         detail.put("checksum", result.getChecksum());
         detail.put("restartRequired", result.getRestartRequired());
         detail.put("message", result.getMessage());
+        detail.put("staleAgentBindingsCleared", staleBindings);
         return detail;
     }
 
