@@ -38,7 +38,7 @@
     return [
       {
         label: 'Approve',
-        auth: 'openclaw:skill:disable',
+        auth: 'openclaw:skill:review',
         ifShow: canReview,
         popConfirm: {
           title: 'Approve this Skill for shared use?',
@@ -50,7 +50,7 @@
       },
       {
         label: 'Reject',
-        auth: 'openclaw:skill:disable',
+        auth: 'openclaw:skill:review',
         ifShow: canReview,
         onClick: () => reject(record),
       },

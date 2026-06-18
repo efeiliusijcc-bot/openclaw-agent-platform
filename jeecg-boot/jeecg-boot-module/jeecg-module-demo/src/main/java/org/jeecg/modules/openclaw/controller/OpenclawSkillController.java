@@ -106,14 +106,14 @@ public class OpenclawSkillController {
     }
 
     @PostMapping("/approve")
-    @RequiresPermissions("openclaw:skill:disable")
+    @RequiresPermissions("openclaw:skill:review")
     public Result<?> approve(@RequestParam String id) {
         skillService.approveSkill(id);
         return Result.OK("Approved successfully");
     }
 
     @PostMapping("/reject")
-    @RequiresPermissions("openclaw:skill:disable")
+    @RequiresPermissions("openclaw:skill:review")
     public Result<?> reject(@RequestParam String id, @RequestParam String reason) {
         skillService.rejectSkill(id, reason);
         return Result.OK("Rejected successfully");
