@@ -76,7 +76,7 @@ public class OpenclawWorkspaceServiceImpl extends ServiceImpl<OpenclawWorkspaceM
         OpenclawWorkspace workspace = requireWorkspace(workspaceId);
         permissionService.checkOwnerOrAdmin(workspace.getUserId());
         OpenclawWorkspaceHealthCheckVO result = inspect(workspace);
-        auditLogService.log("workspace_health_check", "workspace", workspace.getId(), result);
+        auditWorkspaceResult("workspace_health_check", workspace, result);
         return result;
     }
 
@@ -90,8 +90,16 @@ public class OpenclawWorkspaceServiceImpl extends ServiceImpl<OpenclawWorkspaceM
         OpenclawWorkspaceHealthCheckVO result = inspect(workspace);
         workspace.setRemark(result.isHealthy() ? null : String.join("; ", result.getErrors()));
         updateById(workspace);
-        auditLogService.log("workspace_rematerialize", "workspace", workspace.getId(), result);
+        auditWorkspaceResult("workspace_rematerialize", workspace, result);
         return result;
+    }
+
+    private void auditWorkspaceResult(String action, OpenclawWorkspace workspace, OpenclawWorkspaceHealthCheckVO result) {
+        if (result.isHealthy()) {
+            auditLogService.logSuccess(action, "workspace", workspace.getId(), result);
+        } else {
+            auditLogService.logFailure(action, "workspace", workspace.getId(), result);
+        }
     }
 
     private OpenclawWorkspaceHealthCheckVO inspect(OpenclawWorkspace workspace) {
