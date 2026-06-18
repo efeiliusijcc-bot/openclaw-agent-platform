@@ -8,6 +8,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import org.apache.shiro.authz.annotation.RequiresPermissions;
 import org.jeecg.common.api.vo.Result;
+import org.jeecg.common.exception.JeecgBootException;
 import org.jeecg.common.system.query.QueryGenerator;
 import org.jeecg.modules.openclaw.constant.OpenclawConstants;
 import org.jeecg.modules.openclaw.entity.OpenclawGatewayNode;
@@ -26,6 +27,11 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 
 @Tag(name = "OpenClaw Gateway Node")
 @RestController
@@ -57,6 +63,7 @@ public class OpenclawGatewayNodeController {
         node.setCurrentRunning(0);
         node.setStatus(node.getStatus() == null ? "offline" : node.getStatus());
         fillGatewayDefaults(node);
+        validateGatewayNode(node);
         node.setDelFlag(OpenclawConstants.DEL_FLAG_NORMAL);
         gatewayNodeService.save(node);
         auditLogService.logSuccess("gateway_node_add", "gateway", node.getId(), gatewayAuditDetail(node));
@@ -67,6 +74,7 @@ public class OpenclawGatewayNodeController {
     @RequiresPermissions("openclaw:gateway:edit")
     public Result<?> edit(@RequestBody OpenclawGatewayNode node) {
         fillGatewayDefaults(node);
+        validateGatewayNode(node);
         gatewayNodeService.updateById(node);
         auditLogService.logSuccess("gateway_node_edit", "gateway", node.getId(), gatewayAuditDetail(node));
         return Result.OK("更新成功");
@@ -103,6 +111,71 @@ public class OpenclawGatewayNodeController {
         }
         if (node.getRestartRequired() == null) {
             node.setRestartRequired(1);
+        }
+    }
+
+    private void validateGatewayNode(OpenclawGatewayNode node) {
+        if (!StringUtils.hasText(node.getName())) {
+            throw new JeecgBootException("Gateway name is required");
+        }
+        validateGatewayBaseUrl(node.getBaseUrl());
+        validateAbsoluteDirectory("Gateway workspace root", node.getWorkspaceRoot());
+        validateGeneratedConfigPath(node.getConfigPath());
+        validateNonNegative("maxAgents", node.getMaxAgents());
+        validateNonNegative("maxConcurrentRuns", node.getMaxConcurrentRuns());
+    }
+
+    private void validateGatewayBaseUrl(String baseUrl) {
+        if (!StringUtils.hasText(baseUrl)) {
+            throw new JeecgBootException("Gateway base URL is required");
+        }
+        try {
+            URI uri = new URI(baseUrl.trim());
+            String scheme = uri.getScheme();
+            if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)) {
+                throw new JeecgBootException("Gateway base URL must use http or https");
+            }
+            if (!StringUtils.hasText(uri.getHost())) {
+                throw new JeecgBootException("Gateway base URL must include host");
+            }
+        } catch (URISyntaxException e) {
+            throw new JeecgBootException("Gateway base URL is invalid: " + baseUrl, e);
+        }
+    }
+
+    private void validateAbsoluteDirectory(String label, String value) {
+        if (!StringUtils.hasText(value)) {
+            throw new JeecgBootException(label + " is required");
+        }
+        Path path = Paths.get(value).normalize();
+        if (!path.isAbsolute()) {
+            throw new JeecgBootException(label + " must be an absolute path");
+        }
+    }
+
+    private void validateGeneratedConfigPath(String value) {
+        if (!StringUtils.hasText(value)) {
+            throw new JeecgBootException("Gateway config path is required");
+        }
+        Path path = Paths.get(value).normalize();
+        if (!path.isAbsolute()) {
+            throw new JeecgBootException("Gateway config path must be an absolute path");
+        }
+        if (path.getParent() == null) {
+            throw new JeecgBootException("Gateway config path must include parent directory");
+        }
+        String fileName = path.getFileName().toString();
+        if ("openclaw.json".equals(fileName)) {
+            throw new JeecgBootException("Gateway config path must point to the generated agents include file, not main openclaw.json");
+        }
+        if (!fileName.endsWith(".json")) {
+            throw new JeecgBootException("Gateway config path must be a json file");
+        }
+    }
+
+    private void validateNonNegative(String label, Integer value) {
+        if (value != null && value < 0) {
+            throw new JeecgBootException(label + " must not be negative");
         }
     }
 
