@@ -88,12 +88,13 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
         String prompt = normalizePrompt(dto);
 
         Date startTime = new Date();
-        OpenclawAgentRun run = createRunningRun(user, agent, prompt, startTime);
+        OpenclawAgentRun run = createQueuedRun(user, agent, prompt, startTime);
         save(run);
 
         try {
             precheckRunForExecution(agent);
             checkRunQuotaForExecution(user, agent, run.getId());
+            markRunRunning(run);
             CliResult result = executeCli(agent.getAgentKey(), prompt);
             Date finishTime = new Date();
             run.setFinishTime(finishTime);
@@ -147,7 +148,7 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
         String output = "";
         try {
             String model = "openclaw/" + agent.getAgentKey();
-            run = createRunningRun(user, agent, prompt, startTime);
+            run = createQueuedRun(user, agent, prompt, startTime);
             run.setConversationId(conversationId);
             run.setRunType(OpenclawConstants.RUN_TYPE_CHAT);
             run.setStreaming(1);
@@ -156,6 +157,7 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
 
             precheckRunForExecution(agent);
             checkRunQuotaForExecution(user, agent, run.getId());
+            markRunRunning(run);
             sendEvent(emitter, "run_created", streamPayload(run, agent, null, null));
             output = executeGatewayStream(agent, model, prompt, conversationId, emitter);
             finishRun(run, startTime, OpenclawConstants.RUN_STATUS_SUCCESS, output, null);
@@ -552,7 +554,7 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
         }
     }
 
-    private OpenclawAgentRun createRunningRun(LoginUser user, OpenclawAgent agent, String prompt, Date startTime) {
+    private OpenclawAgentRun createQueuedRun(LoginUser user, OpenclawAgent agent, String prompt, Date startTime) {
         OpenclawAgentRun run = new OpenclawAgentRun();
         run.setUserId(user.getId());
         run.setUsername(user.getUsername());
@@ -561,11 +563,16 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
         run.setRunType(OpenclawConstants.RUN_TYPE_TEST);
         run.setStreaming(0);
         run.setModel("openclaw/" + agent.getAgentKey());
-        run.setStatus(OpenclawConstants.RUN_STATUS_RUNNING);
+        run.setStatus(OpenclawConstants.RUN_STATUS_QUEUED);
         run.setInputSummary(trim(prompt, MAX_SUMMARY_LENGTH));
         run.setStartTime(startTime);
         run.setDelFlag(OpenclawConstants.DEL_FLAG_NORMAL);
         return run;
+    }
+
+    private void markRunRunning(OpenclawAgentRun run) {
+        run.setStatus(OpenclawConstants.RUN_STATUS_RUNNING);
+        updateById(run);
     }
 
     private CliResult executeCli(String agentKey, String prompt) throws Exception {

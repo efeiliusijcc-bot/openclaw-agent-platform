@@ -444,11 +444,20 @@
     if (status === 'success') {
       return 'green';
     }
+    if (status === 'queued') {
+      return 'cyan';
+    }
+    if (status === 'running') {
+      return 'blue';
+    }
     if (status === 'failed') {
       return 'red';
     }
     if (status === 'timeout') {
       return 'orange';
+    }
+    if (status === 'cancelled') {
+      return 'default';
     }
     return 'blue';
   }

@@ -32,10 +32,12 @@ public final class OpenclawConstants {
     public static final String SKILL_STATUS_REJECTED = "rejected";
     public static final String SKILL_STATUS_DISABLED = "disabled";
 
+    public static final String RUN_STATUS_QUEUED = "queued";
     public static final String RUN_STATUS_RUNNING = "running";
     public static final String RUN_STATUS_SUCCESS = "success";
     public static final String RUN_STATUS_FAILED = "failed";
     public static final String RUN_STATUS_TIMEOUT = "timeout";
+    public static final String RUN_STATUS_CANCELLED = "cancelled";
     public static final String RUN_TYPE_TEST = "test";
     public static final String RUN_TYPE_CHAT = "chat";
     public static final String RUN_ERROR_GATEWAY_TIMEOUT = "gateway_timeout";

@@ -93,8 +93,14 @@
     if (status === 'timeout') {
       return 'orange';
     }
+    if (status === 'queued') {
+      return 'cyan';
+    }
     if (status === 'running') {
       return 'blue';
+    }
+    if (status === 'cancelled') {
+      return 'default';
     }
     return 'default';
   }
