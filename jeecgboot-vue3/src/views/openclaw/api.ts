@@ -7,6 +7,7 @@ export const addAgent = (params) => defHttp.post({ url: '/openclaw/agent/add', p
 export const editAgent = (params) => defHttp.post({ url: '/openclaw/agent/edit', params });
 export const deleteAgent = (params) => defHttp.delete({ url: '/openclaw/agent/delete', params }, { joinParamsToUrl: true });
 export const disableAgent = (params) => defHttp.post({ url: '/openclaw/agent/disable', params }, { joinParamsToUrl: true });
+export const enableAgent = (params) => defHttp.post({ url: '/openclaw/agent/enable', params }, { joinParamsToUrl: true });
 export const bindSkill = (params) => defHttp.post({ url: '/openclaw/agent/bindSkill', params });
 export const unbindSkill = (params) => defHttp.post({ url: '/openclaw/agent/unbindSkill', params });
 

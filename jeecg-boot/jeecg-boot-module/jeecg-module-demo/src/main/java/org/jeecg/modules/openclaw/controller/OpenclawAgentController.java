@@ -84,6 +84,13 @@ public class OpenclawAgentController {
         return Result.OK("禁用成功");
     }
 
+    @PostMapping("/enable")
+    @RequiresPermissions("openclaw:agent:enable")
+    public Result<?> enable(@RequestParam String id) {
+        agentService.enableAgent(id);
+        return Result.OK("启用成功");
+    }
+
     @PostMapping("/bindSkill")
     @RequiresPermissions("openclaw:agent:bindSkill")
     public Result<?> bindSkill(@RequestBody OpenclawAgentSkillBindDTO dto) {

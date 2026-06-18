@@ -13,4 +13,6 @@ public interface IOpenclawAgentService extends IService<OpenclawAgent> {
     void logicDeleteAgent(String id);
 
     void disableAgent(String id);
+
+    void enableAgent(String id);
 }

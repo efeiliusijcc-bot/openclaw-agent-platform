@@ -147,6 +147,7 @@
     deleteAgent,
     disableAgent,
     editAgent,
+    enableAgent,
     listAgentSkills,
     listAgents,
     listSkills,
@@ -253,7 +254,14 @@
       {
         label: '禁用',
         auth: 'openclaw:agent:disable',
+        ifShow: record.status !== 'disabled',
         onClick: () => Modal.confirm({ title: '确认禁用该 Agent？', okText: '确定', cancelText: '取消', onOk: async () => (await disableAgent({ id: record.id }), reload()) }),
+      },
+      {
+        label: '启用',
+        auth: 'openclaw:agent:enable',
+        ifShow: record.status === 'disabled',
+        onClick: () => Modal.confirm({ title: '确认启用该 Agent？启用后需要重新同步 Gateway。', okText: '确定', cancelText: '取消', onOk: async () => (await enableAgent({ id: record.id }), reload()) }),
       },
     ];
   }

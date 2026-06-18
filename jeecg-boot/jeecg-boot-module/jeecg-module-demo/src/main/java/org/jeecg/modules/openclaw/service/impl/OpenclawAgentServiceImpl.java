@@ -150,6 +150,31 @@ public class OpenclawAgentServiceImpl extends ServiceImpl<OpenclawAgentMapper, O
         auditLogService.log("agent_disable", "agent", agent.getId(), agent);
     }
 
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void enableAgent(String id) {
+        OpenclawAgent agent = getById(id);
+        if (agent == null || Integer.valueOf(OpenclawConstants.DEL_FLAG_DELETED).equals(agent.getDelFlag())) {
+            return;
+        }
+        if (!permissionService.isAdmin(permissionService.currentUser())) {
+            throw new JeecgBootException("只有 OpenClaw 管理员可以启用 Agent");
+        }
+        OpenclawWorkspace workspace = workspaceService.getById(agent.getWorkspaceId());
+        if (workspace == null || Integer.valueOf(OpenclawConstants.DEL_FLAG_DELETED).equals(workspace.getDelFlag())) {
+            throw new JeecgBootException("Agent workspace 不存在，不能启用 Agent");
+        }
+        workspaceMaterializer.materialize(agent, workspace);
+        workspace.setStatus(OpenclawConstants.WORKSPACE_STATUS_READY);
+        workspace.setRemark(null);
+        workspaceService.updateById(workspace);
+        agent.setStatus(OpenclawConstants.AGENT_STATUS_ENABLED);
+        agent.setRemark(null);
+        clearGatewayAssignment(agent);
+        updateById(agent);
+        auditLogService.log("agent_enable", "agent", agent.getId(), agent);
+    }
+
     private String generateAgentKey() {
         return "agt_" + IdWorker.getIdStr();
     }
