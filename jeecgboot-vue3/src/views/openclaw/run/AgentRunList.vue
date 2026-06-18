@@ -43,7 +43,7 @@
   import { reactive, ref } from 'vue';
   import { useRoute } from 'vue-router';
   import { BasicTable, TableAction, useTable } from '/@/components/Table';
-  import { listRuns } from '../api';
+  import { getRunDetail, listRuns } from '../api';
   import { keywordSearch } from '../common';
 
   const route = useRoute();
@@ -78,9 +78,13 @@
     actionColumn: { title: '操作', width: 120, fixed: 'right', slots: { customRender: 'action' } },
   });
 
-  function openDetail(record: any) {
+  async function openDetail(record: any) {
     detailRecord.value = record;
     detailVisible.value = true;
+    const detail = await getRunDetail(record.id).catch(() => null);
+    if (detail) {
+      detailRecord.value = detail;
+    }
   }
 
   function statusColor(status: string) {

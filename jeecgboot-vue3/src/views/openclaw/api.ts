@@ -25,6 +25,7 @@ export const exportSkill = (record) => downloadFile(`/openclaw/skill/${record.id
 export const checkSkillQuality = (id: string) => defHttp.get({ url: `/openclaw/skill/${id}/quality-check` });
 
 export const listRuns = (params) => defHttp.get({ url: '/openclaw/run/list', params });
+export const getRunDetail = (id: string) => defHttp.get({ url: `/openclaw/run/${id}` });
 export const listQuotas = (params) => defHttp.get({ url: '/openclaw/quota/list', params });
 export const myQuota = () => defHttp.get({ url: '/openclaw/quota/my' });
 export const myQuotaUsage = () => defHttp.get({ url: '/openclaw/quota/myUsage' });

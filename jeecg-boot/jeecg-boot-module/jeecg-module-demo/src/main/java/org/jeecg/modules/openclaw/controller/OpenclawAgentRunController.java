@@ -39,4 +39,15 @@ public class OpenclawAgentRunController {
         queryWrapper.orderByDesc("create_time");
         return Result.OK(runService.page(new Page<>(pageNo, pageSize), queryWrapper));
     }
+
+    @GetMapping("/{id}")
+    @RequiresPermissions("openclaw:run:list")
+    public Result<OpenclawAgentRun> detail(@PathVariable String id) {
+        OpenclawAgentRun run = runService.getById(id);
+        if (run == null || Integer.valueOf(OpenclawConstants.DEL_FLAG_DELETED).equals(run.getDelFlag())) {
+            return Result.OK(null);
+        }
+        permissionService.checkOwnerOrAdmin(run.getUserId());
+        return Result.OK(run);
+    }
 }
