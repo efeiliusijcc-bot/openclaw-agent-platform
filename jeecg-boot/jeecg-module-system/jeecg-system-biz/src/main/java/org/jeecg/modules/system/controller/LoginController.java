@@ -194,8 +194,10 @@ public class LoginController {
 		}
 
 		SysUser sysUser = sysUserService.getUserByEmail(email);
+		boolean created = false;
 		if (sysUser == null) {
 			sysUser = createHeaderSsoUser(email, externalUser);
+			created = true;
 		}
 
 		Result<?> effectiveResult = sysUserService.checkUserIsEffective(sysUser);
@@ -207,12 +209,18 @@ public class LoginController {
 		}
 
 		List<String> roleCodes = resolveHeaderSsoRoleCodes(groups);
-		syncHeaderSsoRoles(sysUser.getId(), roleCodes);
+		JSONObject roleSync = syncHeaderSsoRoles(sysUser.getId(), roleCodes);
 		sysUser = sysUserService.getUserByName(sysUser.getUsername());
 		userInfo(sysUser, result, request, CommonConstant.CLIENT_TYPE_PC);
 
 		LoginUser loginUser = new LoginUser();
 		BeanUtils.copyProperties(sysUser, loginUser);
+		if (created) {
+			baseCommonService.addLog("Header SSO user auto-created: " + email + " -> " + sysUser.getUsername(), CommonConstant.LOG_TYPE_1, null, loginUser);
+		}
+		if (Boolean.TRUE.equals(roleSync.getBoolean("changed"))) {
+			baseCommonService.addLog("Header SSO role mapping changed: " + roleSync.toJSONString(), CommonConstant.LOG_TYPE_1, null, loginUser);
+		}
 		baseCommonService.addLog("Header SSO login success: " + email, CommonConstant.LOG_TYPE_1, null, loginUser);
 		return result;
 	}
@@ -646,27 +654,58 @@ public class LoginController {
 		return new ArrayList<>(roleCodes);
 	}
 
-	private void syncHeaderSsoRoles(String userId, List<String> roleCodes) {
+	private JSONObject syncHeaderSsoRoles(String userId, List<String> roleCodes) {
 		List<String> managedCodes = Arrays.asList("openclaw_employee", "openclaw_admin", "openclaw_skill_reviewer");
 		List<String> managedRoleIds = new ArrayList<>();
 		List<String> targetRoleIds = new ArrayList<>();
+		Map<String, String> roleCodeById = new HashMap<>();
 		for (String roleCode : managedCodes) {
 			SysRole role = sysRoleService.getRoleNoTenant(roleCode);
 			if (role == null) {
 				throw new IllegalStateException("Missing JeecgBoot role: " + roleCode);
 			}
 			managedRoleIds.add(role.getId());
+			roleCodeById.put(role.getId(), roleCode);
 			if (roleCodes.contains(roleCode)) {
 				targetRoleIds.add(role.getId());
 			}
 		}
-		sysUserRoleService.remove(new LambdaQueryWrapper<SysUserRole>()
+
+		List<SysUserRole> existingRoles = sysUserRoleService.list(new LambdaQueryWrapper<SysUserRole>()
 				.eq(SysUserRole::getUserId, userId)
 				.in(SysUserRole::getRoleId, managedRoleIds));
-		for (String roleId : targetRoleIds) {
-			sysUserRoleService.save(new SysUserRole(userId, roleId));
+		LinkedHashSet<String> existingRoleIds = new LinkedHashSet<>();
+		for (SysUserRole userRole : existingRoles) {
+			existingRoleIds.add(userRole.getRoleId());
 		}
-		redisUtil.del(CommonConstant.PREFIX_USER_SHIRO_CACHE + userId);
+		LinkedHashSet<String> targetRoleIdSet = new LinkedHashSet<>(targetRoleIds);
+		boolean changed = !existingRoleIds.equals(targetRoleIdSet);
+		if (changed) {
+			sysUserRoleService.remove(new LambdaQueryWrapper<SysUserRole>()
+					.eq(SysUserRole::getUserId, userId)
+					.in(SysUserRole::getRoleId, managedRoleIds));
+			for (String roleId : targetRoleIds) {
+				sysUserRoleService.save(new SysUserRole(userId, roleId));
+			}
+			redisUtil.del(CommonConstant.PREFIX_USER_SHIRO_CACHE + userId);
+		}
+		JSONObject detail = new JSONObject();
+		detail.put("userId", userId);
+		detail.put("previousRoles", toRoleCodes(existingRoleIds, roleCodeById));
+		detail.put("targetRoles", roleCodes);
+		detail.put("changed", changed);
+		return detail;
+	}
+
+	private List<String> toRoleCodes(Collection<String> roleIds, Map<String, String> roleCodeById) {
+		List<String> roleCodes = new ArrayList<>();
+		for (String roleId : roleIds) {
+			String roleCode = roleCodeById.get(roleId);
+			if (roleCode != null) {
+				roleCodes.add(roleCode);
+			}
+		}
+		return roleCodes;
 	}
 
 	/**
