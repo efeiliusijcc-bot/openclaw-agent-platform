@@ -54,7 +54,7 @@ public class OpenclawWorkspaceServiceImpl extends ServiceImpl<OpenclawWorkspaceM
         workspace.setPath(OpenclawConstants.WORKSPACE_ROOT + "/" + user.getId() + "/" + agentKey + "/workspace");
         workspace.setQuotaSizeMb(1024);
         workspace.setUsedSizeMb(0);
-        workspace.setStatus(OpenclawConstants.WORKSPACE_STATUS_ACTIVE);
+        workspace.setStatus(OpenclawConstants.WORKSPACE_STATUS_CREATING);
         workspace.setDelFlag(OpenclawConstants.DEL_FLAG_NORMAL);
         save(workspace);
         return workspace;
@@ -76,6 +76,7 @@ public class OpenclawWorkspaceServiceImpl extends ServiceImpl<OpenclawWorkspaceM
         OpenclawWorkspace workspace = requireWorkspace(workspaceId);
         permissionService.checkOwnerOrAdmin(workspace.getUserId());
         OpenclawWorkspaceHealthCheckVO result = inspect(workspace);
+        updateWorkspaceHealthStatus(workspace, result);
         auditWorkspaceResult("workspace_health_check", workspace, result);
         return result;
     }
@@ -88,8 +89,7 @@ public class OpenclawWorkspaceServiceImpl extends ServiceImpl<OpenclawWorkspaceM
         OpenclawAgent agent = requireAgent(workspace.getId());
         workspaceMaterializer.materialize(agent, workspace);
         OpenclawWorkspaceHealthCheckVO result = inspect(workspace);
-        workspace.setRemark(result.isHealthy() ? null : String.join("; ", result.getErrors()));
-        updateById(workspace);
+        updateWorkspaceHealthStatus(workspace, result);
         auditWorkspaceResult("workspace_rematerialize", workspace, result);
         return result;
     }
@@ -126,6 +126,13 @@ public class OpenclawWorkspaceServiceImpl extends ServiceImpl<OpenclawWorkspaceM
         }
         result.setHealthy(result.getErrors().isEmpty());
         return result;
+    }
+
+    private void updateWorkspaceHealthStatus(OpenclawWorkspace workspace, OpenclawWorkspaceHealthCheckVO result) {
+        workspace.setStatus(result.isHealthy() ? OpenclawConstants.WORKSPACE_STATUS_READY : OpenclawConstants.WORKSPACE_STATUS_ERROR);
+        workspace.setRemark(result.isHealthy() ? null : String.join("; ", result.getErrors()));
+        updateById(workspace);
+        result.setStatus(workspace.getStatus());
     }
 
     private void checkRequiredFiles(Path root, OpenclawWorkspaceHealthCheckVO result) {

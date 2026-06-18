@@ -434,8 +434,8 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
         if (!java.util.Objects.equals(agent.getUserId(), workspace.getUserId())) {
             throw new JeecgBootException("Agent workspace owner does not match the agent owner");
         }
-        if (!OpenclawConstants.WORKSPACE_STATUS_ACTIVE.equals(workspace.getStatus())) {
-            throw new JeecgBootException("Agent workspace is not active: " + workspace.getStatus());
+        if (!OpenclawConstants.WORKSPACE_STATUS_READY.equals(workspace.getStatus())) {
+            throw new JeecgBootException("Agent workspace is not ready: " + workspace.getStatus());
         }
         if (!StringUtils.hasText(workspace.getPath())) {
             throw new JeecgBootException("Agent workspace path is empty; rematerialize the workspace first");

@@ -202,6 +202,9 @@ public class OpenclawGatewayConfigServiceImpl implements IOpenclawGatewayConfigS
         if (!StringUtils.hasText(workspace.getPath())) {
             throw new JeecgBootException("Workspace path is empty for agent: " + agent.getId());
         }
+        if (!OpenclawConstants.WORKSPACE_STATUS_READY.equals(workspace.getStatus())) {
+            throw new JeecgBootException("Workspace is not ready for agent: " + agent.getId() + ", status=" + workspace.getStatus());
+        }
         return workspace;
     }
 

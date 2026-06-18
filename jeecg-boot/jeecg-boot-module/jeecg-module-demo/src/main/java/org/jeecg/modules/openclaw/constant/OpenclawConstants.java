@@ -21,7 +21,9 @@ public final class OpenclawConstants {
     public static final String AGENT_STATUS_ERROR = "error";
     public static final String AGENT_STATUS_DELETED = "deleted";
 
-    public static final String WORKSPACE_STATUS_ACTIVE = "active";
+    public static final String WORKSPACE_STATUS_CREATING = "creating";
+    public static final String WORKSPACE_STATUS_READY = "ready";
+    public static final String WORKSPACE_STATUS_ERROR = "error";
     public static final String WORKSPACE_STATUS_DELETED = "deleted";
 
     public static final String SKILL_STATUS_DRAFT = "draft";

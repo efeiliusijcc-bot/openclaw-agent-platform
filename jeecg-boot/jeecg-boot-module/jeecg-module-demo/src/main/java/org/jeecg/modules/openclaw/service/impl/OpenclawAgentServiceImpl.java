@@ -80,6 +80,8 @@ public class OpenclawAgentServiceImpl extends ServiceImpl<OpenclawAgentMapper, O
         agent.setRemark(dto.getRemark());
         agent.setDelFlag(OpenclawConstants.DEL_FLAG_NORMAL);
         workspaceMaterializer.materialize(agent, workspace);
+        workspace.setStatus(OpenclawConstants.WORKSPACE_STATUS_READY);
+        workspaceService.updateById(workspace);
         save(agent);
         auditLogService.log("agent_create", "agent", agent.getId(), agent);
         return agent;
