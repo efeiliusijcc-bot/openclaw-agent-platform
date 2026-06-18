@@ -1,5 +1,7 @@
 package org.jeecg.modules.openclaw.service.impl;
 
+import com.alibaba.fastjson.JSONArray;
+import com.alibaba.fastjson.JSONObject;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.baomidou.mybatisplus.core.toolkit.IdWorker;
 import jakarta.servlet.http.HttpServletResponse;
@@ -87,6 +89,7 @@ public class OpenclawSkillServiceImpl extends ServiceImpl<OpenclawSkillMapper, O
         try {
             Files.createDirectories(targetDir);
             writeStudioFiles(targetDir, request.getName(), slug, version, request.getDescription(), user.getUsername());
+            writeSkillManifest(targetDir, request.getName(), slug, version, request.getDescription(), user.getUsername());
         } catch (IOException e) {
             cleanupQuietly(targetDir);
             throw new JeecgBootException("Create Skill draft files failed: " + e.getMessage(), e);
@@ -158,6 +161,7 @@ public class OpenclawSkillServiceImpl extends ServiceImpl<OpenclawSkillMapper, O
             movedTargetDir = targetDir;
             moveDirectory(tempDir, targetDir);
             tempDir = null;
+            writeSkillManifest(targetDir, meta.name, slug, version, meta.description, user.getUsername());
 
             OpenclawSkill skill = new OpenclawSkill();
             skill.setOwnerUserId(user.getId());
@@ -205,6 +209,7 @@ public class OpenclawSkillServiceImpl extends ServiceImpl<OpenclawSkillMapper, O
         if (!Files.exists(skillPath) || !Files.isDirectory(skillPath)) {
             throw new JeecgBootException("Skill file directory does not exist.");
         }
+        validateExportManifest(skill, skillPath);
         String filename = skill.getSlug() + "-" + skill.getVersion() + ".zip";
         try {
             response.setContentType("application/zip");
@@ -322,25 +327,64 @@ public class OpenclawSkillServiceImpl extends ServiceImpl<OpenclawSkillMapper, O
             + "- SKILL.md is complete.\n"
             + "- manifest.json matches the Skill metadata.\n"
             + "- examples/input.json can be used for a smoke test.\n";
-        String manifest = "{\n"
-            + "  \"name\": \"" + jsonEscape(cleanName) + "\",\n"
-            + "  \"slug\": \"" + jsonEscape(slug) + "\",\n"
-            + "  \"version\": \"" + jsonEscape(version) + "\",\n"
-            + "  \"description\": \"" + jsonEscape(safeDescription) + "\",\n"
-            + "  \"owner\": \"" + jsonEscape(owner) + "\",\n"
-            + "  \"createdAt\": \"" + LocalDate.now() + "\",\n"
-            + "  \"entry\": \"SKILL.md\",\n"
-            + "  \"examples\": [\"examples/input.json\"]\n"
-            + "}\n";
         Files.writeString(targetDir.resolve("SKILL.md"), skillMd, StandardCharsets.UTF_8, StandardOpenOption.CREATE_NEW);
         Files.writeString(targetDir.resolve("README.md"), readme, StandardCharsets.UTF_8, StandardOpenOption.CREATE_NEW);
-        Files.writeString(targetDir.resolve("manifest.json"), manifest, StandardCharsets.UTF_8, StandardOpenOption.CREATE_NEW);
         Files.createDirectories(targetDir.resolve("examples"));
         Files.writeString(targetDir.resolve("examples").resolve("input.json"), "{\n  \"task\": \"Describe the first smoke test for this Skill.\"\n}\n", StandardCharsets.UTF_8, StandardOpenOption.CREATE_NEW);
     }
 
-    private String jsonEscape(String raw) {
-        return raw == null ? "" : raw.replace("\\", "\\\\").replace("\"", "\\\"");
+    private void writeSkillManifest(Path root, String name, String slug, String version, String description, String owner) throws IOException {
+        JSONObject manifest = new JSONObject(true);
+        manifest.put("name", name);
+        manifest.put("slug", slug);
+        manifest.put("version", version);
+        manifest.put("description", description);
+        manifest.put("owner", owner);
+        manifest.put("generatedAt", LocalDate.now().toString());
+        manifest.put("entry", "SKILL.md");
+
+        JSONArray files = new JSONArray();
+        try (var walk = Files.walk(root)) {
+            List<Path> regularFiles = walk
+                .filter(Files::isRegularFile)
+                .filter(path -> !"manifest.json".equals(path.getFileName().toString()))
+                .sorted()
+                .toList();
+            for (Path file : regularFiles) {
+                JSONObject item = new JSONObject(true);
+                item.put("path", root.relativize(file).toString().replace('\\', '/'));
+                item.put("size", Files.size(file));
+                item.put("checksum", sha256File(file));
+                files.add(item);
+            }
+        }
+        manifest.put("files", files);
+        Files.writeString(root.resolve("manifest.json"), manifest.toJSONString() + System.lineSeparator(), StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+    }
+
+    private void validateExportManifest(OpenclawSkill skill, Path skillPath) {
+        Path manifestPath = skillPath.resolve("manifest.json").normalize();
+        if (!manifestPath.startsWith(skillPath) || !Files.isRegularFile(manifestPath)) {
+            throw new JeecgBootException("Skill manifest.json is missing; run Skill quality check or re-import the Skill.");
+        }
+        try {
+            JSONObject manifest = JSONObject.parseObject(Files.readString(manifestPath, StandardCharsets.UTF_8));
+            if (manifest == null) {
+                throw new JeecgBootException("Skill manifest.json is invalid.");
+            }
+            if (!skill.getSlug().equals(manifest.getString("slug"))) {
+                throw new JeecgBootException("Skill manifest slug does not match database metadata.");
+            }
+            if (!skill.getVersion().equals(manifest.getString("version"))) {
+                throw new JeecgBootException("Skill manifest version does not match database metadata.");
+            }
+            JSONArray files = manifest.getJSONArray("files");
+            if (files == null || files.isEmpty()) {
+                throw new JeecgBootException("Skill manifest does not contain file entries.");
+            }
+        } catch (IOException e) {
+            throw new JeecgBootException("Skill manifest validation failed: " + e.getMessage(), e);
+        }
     }
 
     private void requireFile(OpenclawSkillQualityCheckVO result, Path root, String filename) {
@@ -500,6 +544,26 @@ public class OpenclawSkillServiceImpl extends ServiceImpl<OpenclawSkillMapper, O
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             try (DigestInputStream dis = new DigestInputStream(file.getInputStream(), digest)) {
+                byte[] buffer = new byte[8192];
+                while (dis.read(buffer) != -1) {
+                    // consume stream
+                }
+            }
+            StringBuilder sb = new StringBuilder();
+            for (byte b : digest.digest()) {
+                sb.append(String.format("%02x", b));
+            }
+            return sb.toString();
+        } catch (NoSuchAlgorithmException e) {
+            throw new JeecgBootException("Current JDK does not support SHA-256.", e);
+        }
+    }
+
+    private String sha256File(Path file) throws IOException {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            try (InputStream input = Files.newInputStream(file);
+                 DigestInputStream dis = new DigestInputStream(input, digest)) {
                 byte[] buffer = new byte[8192];
                 while (dis.read(buffer) != -1) {
                     // consume stream
