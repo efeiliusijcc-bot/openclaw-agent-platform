@@ -101,7 +101,7 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
             applyCliResult(run, result);
             persistRunArtifacts(run, agent, result, run.getOutputSummary(), null);
             updateById(run);
-            auditLogService.log("agent_run_test", "agent_run", run.getId(), toResult(run, agent));
+            auditRun("agent_run_test", run, agent);
             return toResult(run, agent);
         } catch (RunTimeoutException e) {
             Date finishTime = new Date();
@@ -112,7 +112,7 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
             run.setErrorMessage(trim(e.getMessage(), MAX_ERROR_LENGTH));
             persistRunArtifacts(run, agent, null, null, e);
             updateById(run);
-            auditLogService.log("agent_run_test", "agent_run", run.getId(), toResult(run, agent));
+            auditLogService.logFailure("agent_run_test", "agent_run", run.getId(), toResult(run, agent));
             return toResult(run, agent);
         } catch (Exception e) {
             Date finishTime = new Date();
@@ -123,7 +123,7 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
             run.setErrorMessage(trim(e.getMessage(), MAX_ERROR_LENGTH));
             persistRunArtifacts(run, agent, null, null, e);
             updateById(run);
-            auditLogService.log("agent_run_test", "agent_run", run.getId(), toResult(run, agent));
+            auditLogService.logFailure("agent_run_test", "agent_run", run.getId(), toResult(run, agent));
             return toResult(run, agent);
         }
     }
@@ -362,9 +362,17 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
 
     private void safeAuditLog(String action, OpenclawAgentRun run, OpenclawAgent agent) {
         try {
-            auditLogService.log(action, "agent_run", run.getId(), toResult(run, agent));
+            auditRun(action, run, agent);
         } catch (Exception ignored) {
             // SSE runs execute asynchronously; missing request/security context must not alter persisted run status.
+        }
+    }
+
+    private void auditRun(String action, OpenclawAgentRun run, OpenclawAgent agent) {
+        if (OpenclawConstants.RUN_STATUS_SUCCESS.equals(run.getStatus())) {
+            auditLogService.logSuccess(action, "agent_run", run.getId(), toResult(run, agent));
+        } else {
+            auditLogService.logFailure(action, "agent_run", run.getId(), toResult(run, agent));
         }
     }
 

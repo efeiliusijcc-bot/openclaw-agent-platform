@@ -16,6 +16,7 @@
       { title: '用户ID', dataIndex: 'userId', width: 170 },
       { title: '用户名', dataIndex: 'username', width: 120 },
       { title: '操作', dataIndex: 'action', width: 150 },
+      { title: '结果', dataIndex: 'result', width: 100 },
       { title: '对象类型', dataIndex: 'targetType', width: 120 },
       { title: '对象ID', dataIndex: 'targetId', width: 170 },
       { title: 'IP', dataIndex: 'ip', width: 140 },

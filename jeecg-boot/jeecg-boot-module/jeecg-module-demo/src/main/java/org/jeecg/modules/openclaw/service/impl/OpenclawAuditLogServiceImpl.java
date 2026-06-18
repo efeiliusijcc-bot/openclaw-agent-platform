@@ -6,6 +6,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import org.apache.shiro.SecurityUtils;
 import org.jeecg.common.system.vo.LoginUser;
 import org.jeecg.common.util.IpUtils;
+import org.jeecg.modules.openclaw.constant.OpenclawConstants;
 import org.jeecg.modules.openclaw.entity.OpenclawAuditLog;
 import org.jeecg.modules.openclaw.mapper.OpenclawAuditLogMapper;
 import org.jeecg.modules.openclaw.service.IOpenclawAuditLogService;
@@ -19,6 +20,20 @@ import java.util.Date;
 public class OpenclawAuditLogServiceImpl extends ServiceImpl<OpenclawAuditLogMapper, OpenclawAuditLog> implements IOpenclawAuditLogService {
     @Override
     public void log(String action, String targetType, String targetId, Object detail) {
+        logSuccess(action, targetType, targetId, detail);
+    }
+
+    @Override
+    public void logSuccess(String action, String targetType, String targetId, Object detail) {
+        doLog(action, OpenclawConstants.AUDIT_RESULT_SUCCESS, targetType, targetId, detail);
+    }
+
+    @Override
+    public void logFailure(String action, String targetType, String targetId, Object detail) {
+        doLog(action, OpenclawConstants.AUDIT_RESULT_FAILED, targetType, targetId, detail);
+    }
+
+    private void doLog(String action, String result, String targetType, String targetId, Object detail) {
         LoginUser user = null;
         Object principal = SecurityUtils.getSubject().getPrincipal();
         if (principal instanceof LoginUser) {
@@ -29,6 +44,7 @@ public class OpenclawAuditLogServiceImpl extends ServiceImpl<OpenclawAuditLogMap
         log.setUserId(user == null ? null : user.getId());
         log.setUsername(user == null ? null : user.getUsername());
         log.setAction(action);
+        log.setResult(result);
         log.setTargetType(targetType);
         log.setTargetId(targetId);
         log.setIp(request == null ? null : IpUtils.getIpAddr(request));

@@ -24,6 +24,7 @@ public class OpenclawAuditLog implements Serializable {
     private String userId;
     private String username;
     private String action;
+    private String result;
     private String targetType;
     private String targetId;
     private String ip;

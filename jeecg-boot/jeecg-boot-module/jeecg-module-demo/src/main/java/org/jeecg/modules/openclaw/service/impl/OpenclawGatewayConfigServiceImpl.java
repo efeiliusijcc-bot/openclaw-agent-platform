@@ -87,12 +87,12 @@ public class OpenclawGatewayConfigServiceImpl implements IOpenclawGatewayConfigS
             node.setRestartRequired(1);
             gatewayNodeMapper.updateById(node);
             OpenclawGatewaySyncResultVO result = toResult(node, rendered, "Config atomically written. Restart OpenClaw Gateway manually.", false);
-            auditLogService.log("gateway_sync", "gateway", node.getId(), syncAuditDetail(result, "success"));
+            auditLogService.logSuccess("gateway_sync", "gateway", node.getId(), syncAuditDetail(result, "success"));
             return result;
         } catch (Exception e) {
             restoreBackup(configPath(node), backup);
             markFailed(node, e);
-            auditLogService.log("gateway_sync", "gateway", node.getId(), failureDetail(e));
+            auditLogService.logFailure("gateway_sync", "gateway", node.getId(), failureDetail(e));
             if (e instanceof JeecgBootException) {
                 throw (JeecgBootException) e;
             }

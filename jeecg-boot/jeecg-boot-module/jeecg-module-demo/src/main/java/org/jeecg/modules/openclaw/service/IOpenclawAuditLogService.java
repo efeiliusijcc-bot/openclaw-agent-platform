@@ -5,4 +5,8 @@ import org.jeecg.modules.openclaw.entity.OpenclawAuditLog;
 
 public interface IOpenclawAuditLogService extends IService<OpenclawAuditLog> {
     void log(String action, String targetType, String targetId, Object detail);
+
+    void logSuccess(String action, String targetType, String targetId, Object detail);
+
+    void logFailure(String action, String targetType, String targetId, Object detail);
 }
