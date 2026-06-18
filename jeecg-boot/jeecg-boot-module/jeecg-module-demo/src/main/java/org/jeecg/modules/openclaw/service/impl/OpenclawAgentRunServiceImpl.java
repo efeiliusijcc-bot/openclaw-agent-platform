@@ -92,8 +92,8 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
         save(run);
 
         try {
-            precheckRun(agent);
-            checkRunQuota(user, agent, run.getId());
+            precheckRunForExecution(agent);
+            checkRunQuotaForExecution(user, agent, run.getId());
             CliResult result = executeCli(agent.getAgentKey(), prompt);
             Date finishTime = new Date();
             run.setFinishTime(finishTime);
@@ -154,8 +154,8 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
             run.setModel(model);
             save(run);
 
-            precheckRun(agent);
-            checkRunQuota(user, agent, run.getId());
+            precheckRunForExecution(agent);
+            checkRunQuotaForExecution(user, agent, run.getId());
             sendEvent(emitter, "run_created", streamPayload(run, agent, null, null));
             output = executeGatewayStream(agent, model, prompt, conversationId, emitter);
             finishRun(run, startTime, OpenclawConstants.RUN_STATUS_SUCCESS, output, null);
@@ -171,7 +171,7 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
         } catch (RunTimeoutException e) {
             finishFailedStreamRun(run, startTime, OpenclawConstants.RUN_STATUS_TIMEOUT, e.getMessage(), agent, emitter, "timeout");
         } catch (Exception e) {
-            finishFailedStreamRun(run, startTime, OpenclawConstants.RUN_STATUS_FAILED, e.getMessage(), agent, emitter, "error");
+            finishFailedStreamRun(run, startTime, OpenclawConstants.RUN_STATUS_FAILED, e, agent, emitter, "error");
         }
     }
 
@@ -342,11 +342,19 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
     }
 
     private void finishFailedStreamRun(OpenclawAgentRun run, Date startTime, String status, String message, OpenclawAgent agent, SseEmitter emitter, String event) {
+        Exception error = OpenclawConstants.RUN_STATUS_TIMEOUT.equals(status)
+            ? new RunTimeoutException(message)
+            : new JeecgBootException(message);
+        finishFailedStreamRun(run, startTime, status, error, agent, emitter, event);
+    }
+
+    private void finishFailedStreamRun(OpenclawAgentRun run, Date startTime, String status, Exception error, OpenclawAgent agent, SseEmitter emitter, String event) {
+        String message = error == null ? null : error.getMessage();
         try {
             finishRun(run, startTime, status, null, message);
             if (run != null && agent != null) {
-                run.setErrorType(OpenclawConstants.RUN_STATUS_TIMEOUT.equals(status) ? OpenclawConstants.RUN_ERROR_GATEWAY_TIMEOUT : OpenclawConstants.RUN_ERROR_OPENCLAW_ERROR);
-                persistRunArtifacts(run, agent, null, null, new JeecgBootException(message));
+                run.setErrorType(classifyError(error));
+                persistRunArtifacts(run, agent, null, null, error);
                 updateById(run);
             }
             JSONObject payload = run == null ? new JSONObject().fluentPut("status", status).fluentPut("errorMessage", trim(message, MAX_ERROR_LENGTH)) : streamPayload(run, agent, null, message);
@@ -421,6 +429,14 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
     private void precheckRun(OpenclawAgent agent) {
         precheckWorkspace(agent);
         precheckGateway(agent);
+    }
+
+    private void precheckRunForExecution(OpenclawAgent agent) {
+        try {
+            precheckRun(agent);
+        } catch (JeecgBootException e) {
+            throw new RunPrecheckException(e.getMessage(), e);
+        }
     }
 
     private void precheckWorkspace(OpenclawAgent agent) {
@@ -584,6 +600,14 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
     private long timeoutSeconds() {
         long value = runTimeoutSeconds == null ? 600L : runTimeoutSeconds;
         return Math.max(1L, Math.min(value, 3600L));
+    }
+
+    private void checkRunQuotaForExecution(LoginUser user, OpenclawAgent agent, String currentRunId) {
+        try {
+            checkRunQuota(user, agent, currentRunId);
+        } catch (JeecgBootException e) {
+            throw new RunQuotaException(e.getMessage(), e);
+        }
     }
 
     private String normalizeConversationId(OpenclawAgentRunTestDTO dto) {
@@ -793,6 +817,12 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
         if (e instanceof RunTimeoutException) {
             return OpenclawConstants.RUN_ERROR_GATEWAY_TIMEOUT;
         }
+        if (e instanceof RunPrecheckException) {
+            return OpenclawConstants.RUN_ERROR_PRECHECK_FAILED;
+        }
+        if (e instanceof RunQuotaException) {
+            return OpenclawConstants.RUN_ERROR_QUOTA_EXCEEDED;
+        }
         if (e instanceof JeecgBootException && StringUtils.hasText(e.getMessage()) && e.getMessage().contains("CLI")) {
             return OpenclawConstants.RUN_ERROR_CLI_FALLBACK_FAILED;
         }
@@ -833,6 +863,18 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
     private static class RunTimeoutException extends RuntimeException {
         private RunTimeoutException(String message) {
             super(message);
+        }
+    }
+
+    private static class RunPrecheckException extends JeecgBootException {
+        private RunPrecheckException(String message, Throwable cause) {
+            super(message, cause);
+        }
+    }
+
+    private static class RunQuotaException extends JeecgBootException {
+        private RunQuotaException(String message, Throwable cause) {
+            super(message, cause);
         }
     }
 }

@@ -38,6 +38,8 @@ public final class OpenclawConstants {
     public static final String RUN_TYPE_TEST = "test";
     public static final String RUN_TYPE_CHAT = "chat";
     public static final String RUN_ERROR_GATEWAY_TIMEOUT = "gateway_timeout";
+    public static final String RUN_ERROR_PRECHECK_FAILED = "precheck_failed";
+    public static final String RUN_ERROR_QUOTA_EXCEEDED = "quota_exceeded";
     public static final String RUN_ERROR_OPENCLAW_ERROR = "openclaw_error";
     public static final String RUN_ERROR_CLI_FALLBACK_FAILED = "cli_fallback_failed";
     public static final String RUN_ERROR_UNKNOWN = "unknown_error";
