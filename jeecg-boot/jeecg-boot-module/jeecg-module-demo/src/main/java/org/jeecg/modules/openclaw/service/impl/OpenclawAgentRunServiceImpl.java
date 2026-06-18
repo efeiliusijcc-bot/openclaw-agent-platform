@@ -86,14 +86,14 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
         OpenclawAgent agent = requireAgent(agentId);
         permissionService.checkOwnerOrAdmin(agent.getUserId());
         String prompt = normalizePrompt(dto);
-        precheckRun(agent);
-        checkRunQuota(user, agent);
 
         Date startTime = new Date();
         OpenclawAgentRun run = createRunningRun(user, agent, prompt, startTime);
         save(run);
 
         try {
+            precheckRun(agent);
+            checkRunQuota(user, agent, run.getId());
             CliResult result = executeCli(agent.getAgentKey(), prompt);
             Date finishTime = new Date();
             run.setFinishTime(finishTime);
@@ -134,8 +134,6 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
         OpenclawAgent agent = requireAgent(agentId);
         permissionService.checkOwnerOrAdmin(agent.getUserId());
         String prompt = normalizePrompt(dto);
-        precheckRun(agent);
-        checkRunQuota(user, agent);
         String conversationId = normalizeConversationId(dto);
 
         SseEmitter emitter = new SseEmitter((timeoutSeconds() + 30) * 1000L);
@@ -156,6 +154,8 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
             run.setModel(model);
             save(run);
 
+            precheckRun(agent);
+            checkRunQuota(user, agent, run.getId());
             sendEvent(emitter, "run_created", streamPayload(run, agent, null, null));
             output = executeGatewayStream(agent, model, prompt, conversationId, emitter);
             finishRun(run, startTime, OpenclawConstants.RUN_STATUS_SUCCESS, output, null);
@@ -492,35 +492,44 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
         return prompt;
     }
 
-    private void checkRunQuota(LoginUser user, OpenclawAgent agent) {
+    private void checkRunQuota(LoginUser user, OpenclawAgent agent, String currentRunId) {
         OpenclawUserQuota quota = quotaService.getOrCreateQuota(user);
         if (!OpenclawConstants.STATUS_ENABLED.equals(quota.getStatus())) {
             throw new JeecgBootException("OpenClaw quota is disabled");
         }
         Date dayStart = Date.from(LocalDate.now().atStartOfDay(ZoneId.systemDefault()).toInstant());
-        Long todayRuns = lambdaQuery()
+        var todayRunQuery = lambdaQuery()
             .eq(OpenclawAgentRun::getUserId, user.getId())
             .ge(OpenclawAgentRun::getCreateTime, dayStart)
-            .eq(OpenclawAgentRun::getDelFlag, OpenclawConstants.DEL_FLAG_NORMAL)
-            .count();
+            .eq(OpenclawAgentRun::getDelFlag, OpenclawConstants.DEL_FLAG_NORMAL);
+        if (StringUtils.hasText(currentRunId)) {
+            todayRunQuery.ne(OpenclawAgentRun::getId, currentRunId);
+        }
+        Long todayRuns = todayRunQuery.count();
         if (quota.getMaxDailyRuns() != null && todayRuns >= quota.getMaxDailyRuns()) {
             throw new JeecgBootException("Daily run quota exceeded");
         }
         if (agent.getMaxDailyRuns() != null) {
-            Long agentTodayRuns = lambdaQuery()
+            var agentTodayRunQuery = lambdaQuery()
                 .eq(OpenclawAgentRun::getAgentId, agent.getId())
                 .ge(OpenclawAgentRun::getCreateTime, dayStart)
-                .eq(OpenclawAgentRun::getDelFlag, OpenclawConstants.DEL_FLAG_NORMAL)
-                .count();
+                .eq(OpenclawAgentRun::getDelFlag, OpenclawConstants.DEL_FLAG_NORMAL);
+            if (StringUtils.hasText(currentRunId)) {
+                agentTodayRunQuery.ne(OpenclawAgentRun::getId, currentRunId);
+            }
+            Long agentTodayRuns = agentTodayRunQuery.count();
             if (agentTodayRuns >= agent.getMaxDailyRuns()) {
                 throw new JeecgBootException("Agent daily run quota exceeded");
             }
         }
-        Long runningRuns = lambdaQuery()
+        var runningRunQuery = lambdaQuery()
             .eq(OpenclawAgentRun::getUserId, user.getId())
             .eq(OpenclawAgentRun::getStatus, OpenclawConstants.RUN_STATUS_RUNNING)
-            .eq(OpenclawAgentRun::getDelFlag, OpenclawConstants.DEL_FLAG_NORMAL)
-            .count();
+            .eq(OpenclawAgentRun::getDelFlag, OpenclawConstants.DEL_FLAG_NORMAL);
+        if (StringUtils.hasText(currentRunId)) {
+            runningRunQuery.ne(OpenclawAgentRun::getId, currentRunId);
+        }
+        Long runningRuns = runningRunQuery.count();
         if (quota.getMaxConcurrentRuns() != null && runningRuns >= quota.getMaxConcurrentRuns()) {
             throw new JeecgBootException("Concurrent run quota exceeded");
         }
