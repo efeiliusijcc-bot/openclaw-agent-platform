@@ -706,7 +706,10 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
             Files.createDirectories(outputDir);
             Files.createDirectories(logDir);
 
-            String fullOutput = firstText(output, cliResult == null ? null : cliResult.stdout, "");
+            String fullOutput = firstText(output, cliResult == null ? null : cliResult.stdout);
+            if (fullOutput == null) {
+                fullOutput = "";
+            }
             Path outputFile = outputDir.resolve("run-" + run.getId() + ".txt").normalize();
             Files.writeString(outputFile, fullOutput, StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
             run.setFullOutputPath(outputFile.toString());
