@@ -46,9 +46,11 @@ public class OpenclawSkillController {
                                              HttpServletRequest req) {
         QueryWrapper<OpenclawSkill> queryWrapper = QueryGenerator.initQueryWrapper(skill, req.getParameterMap());
         queryWrapper.eq("del_flag", OpenclawConstants.DEL_FLAG_NORMAL);
-        String userId = permissionService.currentUserIdForQuery();
-        if (userId != null) {
-            queryWrapper.eq("owner_user_id", userId);
+        if (!permissionService.isSkillReviewer(permissionService.currentUser())) {
+            String userId = permissionService.currentUserIdForQuery();
+            if (userId != null) {
+                queryWrapper.eq("owner_user_id", userId);
+            }
         }
         queryWrapper.orderByDesc("create_time");
         return Result.OK(skillService.page(new Page<>(pageNo, pageSize), queryWrapper));
@@ -113,6 +115,20 @@ public class OpenclawSkillController {
     public Result<?> disable(@RequestParam String id) {
         skillService.disableSkill(id);
         return Result.OK("Disabled successfully");
+    }
+
+    @PostMapping("/approve")
+    @RequiresPermissions("openclaw:skill:disable")
+    public Result<?> approve(@RequestParam String id) {
+        skillService.approveSkill(id);
+        return Result.OK("Approved successfully");
+    }
+
+    @PostMapping("/reject")
+    @RequiresPermissions("openclaw:skill:disable")
+    public Result<?> reject(@RequestParam String id, @RequestParam String reason) {
+        skillService.rejectSkill(id, reason);
+        return Result.OK("Rejected successfully");
     }
 
     @GetMapping("/queryById")

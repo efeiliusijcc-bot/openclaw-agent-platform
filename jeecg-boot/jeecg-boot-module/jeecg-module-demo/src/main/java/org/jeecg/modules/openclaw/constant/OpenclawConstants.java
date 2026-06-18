@@ -29,6 +29,7 @@ public final class OpenclawConstants {
     public static final String SKILL_STATUS_DRAFT = "draft";
     public static final String SKILL_STATUS_PRIVATE = "private";
     public static final String SKILL_STATUS_APPROVED = "approved";
+    public static final String SKILL_STATUS_REJECTED = "rejected";
     public static final String SKILL_STATUS_DISABLED = "disabled";
 
     public static final String RUN_STATUS_RUNNING = "running";

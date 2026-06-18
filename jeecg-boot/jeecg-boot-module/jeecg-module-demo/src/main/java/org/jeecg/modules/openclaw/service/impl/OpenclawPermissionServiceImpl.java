@@ -25,6 +25,11 @@ public class OpenclawPermissionServiceImpl implements IOpenclawPermissionService
     }
 
     @Override
+    public boolean isSkillReviewer(LoginUser user) {
+        return isAdmin(user) || SecurityUtils.getSubject().hasRole(OpenclawConstants.ROLE_SKILL_REVIEWER);
+    }
+
+    @Override
     public void checkOwnerOrAdmin(String ownerUserId) {
         LoginUser user = currentUser();
         if (isAdmin(user)) {

@@ -7,6 +7,8 @@ public interface IOpenclawPermissionService {
 
     boolean isAdmin(LoginUser user);
 
+    boolean isSkillReviewer(LoginUser user);
+
     void checkOwnerOrAdmin(String ownerUserId);
 
     String currentUserIdForQuery();

@@ -18,6 +18,8 @@ export const addSkill = (params) => defHttp.post({ url: '/openclaw/skill/add', p
 export const editSkill = (params) => defHttp.post({ url: '/openclaw/skill/edit', params });
 export const deleteSkill = (params) => defHttp.delete({ url: '/openclaw/skill/delete', params }, { joinParamsToUrl: true });
 export const disableSkill = (params) => defHttp.post({ url: '/openclaw/skill/disable', params }, { joinParamsToUrl: true });
+export const approveSkill = (params) => defHttp.post({ url: '/openclaw/skill/approve', params }, { joinParamsToUrl: true });
+export const rejectSkill = (params) => defHttp.post({ url: '/openclaw/skill/reject', params }, { joinParamsToUrl: true });
 export const importSkill = (file: File) => defHttp.uploadFile({ url: '/openclaw/skill/import' }, { name: 'file', file });
 export const exportSkill = (record) => downloadFile(`/openclaw/skill/${record.id}/export`, `${record.slug}-${record.version}.zip`);
 export const checkSkillQuality = (id: string) => defHttp.get({ url: `/openclaw/skill/${id}/quality-check` });

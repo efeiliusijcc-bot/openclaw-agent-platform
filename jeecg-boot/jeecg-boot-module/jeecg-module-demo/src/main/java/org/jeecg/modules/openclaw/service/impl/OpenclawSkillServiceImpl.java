@@ -290,6 +290,64 @@ public class OpenclawSkillServiceImpl extends ServiceImpl<OpenclawSkillMapper, O
         auditLogService.log("skill_disable", "skill", skill.getId(), skill);
     }
 
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void approveSkill(String id) {
+        OpenclawSkill skill = requireReviewableSkill(id);
+        OpenclawSkillQualityCheckVO quality = checkSkillQualityForReview(skill);
+        if (!Boolean.TRUE.equals(quality.getPassed())) {
+            throw new JeecgBootException("Skill quality check must pass before approval.");
+        }
+        skill.setStatus(OpenclawConstants.SKILL_STATUS_APPROVED);
+        skill.setScope("public");
+        skill.setRemark(null);
+        updateById(skill);
+        auditLogService.logSuccess("skill_approve", "skill", skill.getId(), skill);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void rejectSkill(String id, String reason) {
+        OpenclawSkill skill = requireReviewableSkill(id);
+        if (!StringUtils.hasText(reason)) {
+            throw new JeecgBootException("Reject reason is required.");
+        }
+        skill.setStatus(OpenclawConstants.SKILL_STATUS_REJECTED);
+        skill.setRemark(trim(reason, 1000));
+        updateById(skill);
+        auditLogService.logFailure("skill_reject", "skill", skill.getId(), skill);
+    }
+
+    private OpenclawSkill requireReviewableSkill(String id) {
+        LoginUser reviewer = permissionService.currentUser();
+        if (!permissionService.isSkillReviewer(reviewer)) {
+            throw new JeecgBootException("Only OpenClaw Skill reviewers can review Skills.");
+        }
+        OpenclawSkill skill = getById(id);
+        if (skill == null || Integer.valueOf(OpenclawConstants.DEL_FLAG_DELETED).equals(skill.getDelFlag())) {
+            throw new JeecgBootException("Skill does not exist");
+        }
+        if (OpenclawConstants.SKILL_STATUS_DISABLED.equals(skill.getStatus())) {
+            throw new JeecgBootException("Disabled Skill cannot be reviewed.");
+        }
+        return skill;
+    }
+
+    private OpenclawSkillQualityCheckVO checkSkillQualityForReview(OpenclawSkill skill) {
+        Path skillPath = Paths.get(skill.getPath()).normalize();
+        OpenclawSkillQualityCheckVO result = new OpenclawSkillQualityCheckVO();
+        if (!Files.exists(skillPath) || !Files.isDirectory(skillPath)) {
+            result.getMissingFiles().add("skill directory");
+            result.getWarnings().add("Skill files are missing on disk.");
+            return result;
+        }
+        requireFile(result, skillPath, "SKILL.md");
+        requireFile(result, skillPath, "manifest.json");
+        inspectSkillDirectory(result, skillPath);
+        result.setPassed(result.getMissingFiles().isEmpty());
+        return result;
+    }
+
     private void validateUpload(MultipartFile file) {
         if (file == null || file.isEmpty()) {
             throw new JeecgBootException("Uploaded file cannot be empty.");
@@ -628,6 +686,13 @@ public class OpenclawSkillServiceImpl extends ServiceImpl<OpenclawSkillMapper, O
             slug = slug.substring(0, 100);
         }
         return slug;
+    }
+
+    private String trim(String value, int maxLength) {
+        if (value == null || value.length() <= maxLength) {
+            return value;
+        }
+        return value.substring(0, maxLength);
     }
 
     private String normalizeVersion(String raw) {

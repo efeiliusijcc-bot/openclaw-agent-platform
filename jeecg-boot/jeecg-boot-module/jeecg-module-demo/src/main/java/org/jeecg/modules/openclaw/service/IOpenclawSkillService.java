@@ -19,4 +19,8 @@ public interface IOpenclawSkillService extends IService<OpenclawSkill> {
     void logicDeleteSkill(String id);
 
     void disableSkill(String id);
+
+    void approveSkill(String id);
+
+    void rejectSkill(String id, String reason);
 }
