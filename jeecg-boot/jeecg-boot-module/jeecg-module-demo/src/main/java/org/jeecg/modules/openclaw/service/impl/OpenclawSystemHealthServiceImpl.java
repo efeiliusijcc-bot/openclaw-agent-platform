@@ -132,6 +132,10 @@ public class OpenclawSystemHealthServiceImpl implements IOpenclawSystemHealthSer
         item.setStatus(node.getStatus());
         item.setBaseUrl(node.getBaseUrl());
         item.setConfigPath(configPath(node));
+        item.setCurrentAgents(node.getCurrentAgents());
+        item.setMaxAgents(node.getMaxAgents());
+        item.setCurrentRunning(node.getCurrentRunning());
+        item.setMaxConcurrentRuns(node.getMaxConcurrentRuns());
         item.setLastSyncStatus(node.getLastSyncStatus());
         item.setLastSyncMessage(node.getLastSyncMessage());
         item.setLastSyncTime(node.getLastSyncTime());
@@ -175,6 +179,20 @@ public class OpenclawSystemHealthServiceImpl implements IOpenclawSystemHealthSer
         if (Boolean.TRUE.equals(item.getRestartRequired())) {
             item.setHealthStatus(STATUS_WARN);
             item.setHealthMessage("Gateway restart is required after config sync");
+            return;
+        }
+        if (item.getMaxAgents() != null
+            && item.getMaxAgents() > 0
+            && safeCount(item.getCurrentAgents()) > item.getMaxAgents()) {
+            item.setHealthStatus(STATUS_WARN);
+            item.setHealthMessage("Gateway agent capacity exceeded: " + safeCount(item.getCurrentAgents()) + "/" + item.getMaxAgents());
+            return;
+        }
+        if (item.getMaxConcurrentRuns() != null
+            && item.getMaxConcurrentRuns() > 0
+            && safeCount(item.getCurrentRunning()) >= item.getMaxConcurrentRuns()) {
+            item.setHealthStatus(STATUS_WARN);
+            item.setHealthMessage("Gateway concurrent run capacity is full: " + safeCount(item.getCurrentRunning()) + "/" + item.getMaxConcurrentRuns());
             return;
         }
         item.setHealthStatus(STATUS_UP);
@@ -294,5 +312,9 @@ public class OpenclawSystemHealthServiceImpl implements IOpenclawSystemHealthSer
             }
         }
         return null;
+    }
+
+    private int safeCount(Integer value) {
+        return value == null ? 0 : value;
     }
 }

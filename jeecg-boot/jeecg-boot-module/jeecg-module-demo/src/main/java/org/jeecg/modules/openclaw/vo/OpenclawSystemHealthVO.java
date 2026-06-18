@@ -62,6 +62,10 @@ public class OpenclawSystemHealthVO {
         private String healthMessage;
         private String baseUrl;
         private String configPath;
+        private Integer currentAgents;
+        private Integer maxAgents;
+        private Integer currentRunning;
+        private Integer maxConcurrentRuns;
         private String lastSyncStatus;
         private String lastSyncMessage;
         @JsonFormat(timezone = "GMT+8", pattern = "yyyy-MM-dd HH:mm:ss")
