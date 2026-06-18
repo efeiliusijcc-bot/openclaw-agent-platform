@@ -2,6 +2,7 @@ package org.jeecg.modules.openclaw.controller;
 
 import com.alibaba.fastjson.JSONObject;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -12,6 +13,8 @@ import org.jeecg.common.exception.JeecgBootException;
 import org.jeecg.common.system.query.QueryGenerator;
 import org.jeecg.modules.openclaw.constant.OpenclawConstants;
 import org.jeecg.modules.openclaw.entity.OpenclawGatewayNode;
+import org.jeecg.modules.openclaw.entity.OpenclawAgent;
+import org.jeecg.modules.openclaw.mapper.OpenclawAgentMapper;
 import org.jeecg.modules.openclaw.service.IOpenclawAuditLogService;
 import org.jeecg.modules.openclaw.service.IOpenclawGatewayConfigService;
 import org.jeecg.modules.openclaw.service.IOpenclawGatewayNodeService;
@@ -32,6 +35,7 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Objects;
 import java.util.Set;
 
 @Tag(name = "OpenClaw Gateway Node")
@@ -50,6 +54,8 @@ public class OpenclawGatewayNodeController {
     private IOpenclawGatewayConfigService gatewayConfigService;
     @Autowired
     private IOpenclawAuditLogService auditLogService;
+    @Autowired
+    private OpenclawAgentMapper agentMapper;
 
     @GetMapping("/list")
     @RequiresPermissions("openclaw:gateway:list")
@@ -80,10 +86,27 @@ public class OpenclawGatewayNodeController {
     @RequestMapping(value = "/edit", method = {RequestMethod.PUT, RequestMethod.POST})
     @RequiresPermissions("openclaw:gateway:edit")
     public Result<?> edit(@RequestBody OpenclawGatewayNode node) {
-        fillGatewayDefaults(node);
-        validateGatewayNode(node);
-        gatewayNodeService.updateById(node);
-        auditLogService.logSuccess("gateway_node_edit", "gateway", node.getId(), gatewayAuditDetail(node));
+        if (node == null || !StringUtils.hasText(node.getId())) {
+            throw new JeecgBootException("Gateway id is required");
+        }
+        OpenclawGatewayNode existing = gatewayNodeService.getById(node.getId());
+        if (existing == null || Integer.valueOf(OpenclawConstants.DEL_FLAG_DELETED).equals(existing.getDelFlag())) {
+            throw new JeecgBootException("Gateway node does not exist");
+        }
+        JSONObject before = gatewayAuditDetail(existing);
+        applyEditableGatewayFields(existing, node);
+        fillGatewayDefaults(existing);
+        validateGatewayNode(existing);
+        boolean syncInvalidated = gatewayConfigChanged(before, existing);
+        if (syncInvalidated) {
+            existing.setLastSyncStatus(OpenclawConstants.RUN_STATUS_FAILED);
+            existing.setLastSyncMessage("Gateway node configuration changed; sync required.");
+            existing.setLastSyncChecksum(null);
+            existing.setRestartRequired(1);
+        }
+        gatewayNodeService.updateById(existing);
+        int clearedAgents = syncInvalidated ? clearGatewayAgentBindings(existing.getId()) : 0;
+        auditLogService.logSuccess("gateway_node_edit", "gateway", existing.getId(), gatewayAuditDetail(before, existing, syncInvalidated, clearedAgents));
         return Result.OK("更新成功");
     }
 
@@ -195,6 +218,31 @@ public class OpenclawGatewayNodeController {
         }
     }
 
+    private void applyEditableGatewayFields(OpenclawGatewayNode target, OpenclawGatewayNode source) {
+        target.setName(source.getName());
+        target.setBaseUrl(source.getBaseUrl());
+        target.setStatus(source.getStatus());
+        target.setMaxAgents(source.getMaxAgents());
+        target.setMaxConcurrentRuns(source.getMaxConcurrentRuns());
+        target.setConfigPath(source.getConfigPath());
+        target.setWorkspaceRoot(source.getWorkspaceRoot());
+        target.setRemark(source.getRemark());
+    }
+
+    private boolean gatewayConfigChanged(JSONObject before, OpenclawGatewayNode after) {
+        return !Objects.equals(before.getString("baseUrl"), after.getBaseUrl())
+            || !Objects.equals(before.getString("status"), after.getStatus())
+            || !Objects.equals(before.getString("configPath"), after.getConfigPath())
+            || !Objects.equals(before.getString("workspaceRoot"), after.getWorkspaceRoot());
+    }
+
+    private int clearGatewayAgentBindings(String gatewayId) {
+        return agentMapper.update(null, new LambdaUpdateWrapper<OpenclawAgent>()
+            .eq(OpenclawAgent::getGatewayId, gatewayId)
+            .eq(OpenclawAgent::getDelFlag, OpenclawConstants.DEL_FLAG_NORMAL)
+            .set(OpenclawAgent::getGatewayId, null));
+    }
+
     private JSONObject gatewayAuditDetail(OpenclawGatewayNode node) {
         JSONObject detail = new JSONObject();
         detail.put("gatewayId", node.getId());
@@ -203,6 +251,15 @@ public class OpenclawGatewayNodeController {
         detail.put("status", node.getStatus());
         detail.put("configPath", node.getConfigPath());
         detail.put("workspaceRoot", node.getWorkspaceRoot());
+        return detail;
+    }
+
+    private JSONObject gatewayAuditDetail(JSONObject before, OpenclawGatewayNode after, boolean syncInvalidated, int clearedAgents) {
+        JSONObject detail = new JSONObject(true);
+        detail.put("before", before);
+        detail.put("after", gatewayAuditDetail(after));
+        detail.put("syncInvalidated", syncInvalidated);
+        detail.put("agentBindingsCleared", clearedAgents);
         return detail;
     }
 }
