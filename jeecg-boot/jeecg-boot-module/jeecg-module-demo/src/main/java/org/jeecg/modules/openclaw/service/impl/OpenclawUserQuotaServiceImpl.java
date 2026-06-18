@@ -1,5 +1,6 @@
 package org.jeecg.modules.openclaw.service.impl;
 
+import com.alibaba.fastjson.JSONObject;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import org.jeecg.common.exception.JeecgBootException;
@@ -92,6 +93,8 @@ public class OpenclawUserQuotaServiceImpl extends ServiceImpl<OpenclawUserQuotaM
             quota.setUsername(dto.getUsername());
             quota.setDelFlag(OpenclawConstants.DEL_FLAG_NORMAL);
         }
+        JSONObject before = quota.getId() == null ? null : quotaSnapshot(quota);
+        boolean created = quota.getId() == null;
         BeanUtils.copyProperties(dto, quota, "id", "userId", "username");
         quota.setUserId(dto.getUserId());
         if (StringUtils.hasText(dto.getUsername())) {
@@ -119,7 +122,7 @@ public class OpenclawUserQuotaServiceImpl extends ServiceImpl<OpenclawUserQuotaM
             quota.setMaxConcurrentRuns(2);
         }
         saveOrUpdate(quota);
-        auditLogService.log("quota_update", "quota", quota.getId(), quota);
+        auditLogService.logSuccess(created ? "quota_create" : "quota_update", "quota", quota.getId(), quotaAuditDetail(before, quota));
     }
 
     @Override
@@ -166,5 +169,29 @@ public class OpenclawUserQuotaServiceImpl extends ServiceImpl<OpenclawUserQuotaM
             .eq(OpenclawAgentRun::getUserId, userId)
             .eq(OpenclawAgentRun::getStatus, OpenclawConstants.RUN_STATUS_RUNNING)
             .eq(OpenclawAgentRun::getDelFlag, OpenclawConstants.DEL_FLAG_NORMAL);
+    }
+
+    private JSONObject quotaAuditDetail(JSONObject before, OpenclawUserQuota after) {
+        JSONObject detail = new JSONObject(true);
+        detail.put("userId", after.getUserId());
+        detail.put("username", after.getUsername());
+        detail.put("before", before);
+        detail.put("after", quotaSnapshot(after));
+        return detail;
+    }
+
+    private JSONObject quotaSnapshot(OpenclawUserQuota quota) {
+        JSONObject snapshot = new JSONObject(true);
+        snapshot.put("id", quota.getId());
+        snapshot.put("userId", quota.getUserId());
+        snapshot.put("username", quota.getUsername());
+        snapshot.put("maxAgents", quota.getMaxAgents());
+        snapshot.put("maxWorkspaces", quota.getMaxWorkspaces());
+        snapshot.put("maxSkills", quota.getMaxSkills());
+        snapshot.put("maxStorageMb", quota.getMaxStorageMb());
+        snapshot.put("maxDailyRuns", quota.getMaxDailyRuns());
+        snapshot.put("maxConcurrentRuns", quota.getMaxConcurrentRuns());
+        snapshot.put("status", quota.getStatus());
+        return snapshot;
     }
 }
