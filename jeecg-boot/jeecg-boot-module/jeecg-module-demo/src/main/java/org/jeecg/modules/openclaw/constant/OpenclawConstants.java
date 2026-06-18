@@ -60,6 +60,7 @@ public final class OpenclawConstants {
     public static final int MAX_SKILL_ZIP_FILE_COUNT = 1000;
 
     public static final String WORKSPACE_ROOT = "/data/openclaw-platform/workspaces";
+    public static final String WORKSPACE_ARCHIVE_ROOT = "/data/openclaw-platform/archived-workspaces";
     public static final String SKILL_ROOT = "/data/openclaw-platform/skills";
     public static final String DEFAULT_GATEWAY_CONFIG_PATH = "/data/openclaw-gateway/.openclaw/jeecg-agents.json";
 

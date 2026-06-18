@@ -24,6 +24,10 @@ import org.springframework.transaction.annotation.Transactional;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 import java.util.List;
 
 @Service
@@ -69,9 +73,49 @@ public class OpenclawWorkspaceServiceImpl extends ServiceImpl<OpenclawWorkspaceM
         if (workspace == null) {
             return;
         }
+        archiveWorkspaceDirectory(workspace);
         workspace.setStatus(OpenclawConstants.WORKSPACE_STATUS_DELETED);
         workspace.setDelFlag(OpenclawConstants.DEL_FLAG_DELETED);
         updateById(workspace);
+    }
+
+    private void archiveWorkspaceDirectory(OpenclawWorkspace workspace) {
+        if (!org.springframework.util.StringUtils.hasText(workspace.getPath())) {
+            workspace.setRemark("Workspace deleted without archive: path is empty");
+            return;
+        }
+        String originalPath = workspace.getPath();
+        Path source = workspaceMaterializer.safeWorkspacePath(originalPath);
+        try {
+            if (!Files.exists(source)) {
+                workspace.setRemark("Workspace directory missing when deleted: " + originalPath);
+                return;
+            }
+            if (!Files.isDirectory(source)) {
+                throw new JeecgBootException("Workspace path is not a directory: " + originalPath);
+            }
+            workspaceMaterializer.ensureNoSymbolicLink(source);
+            Path archiveRoot = Paths.get(OpenclawConstants.WORKSPACE_ARCHIVE_ROOT).toAbsolutePath().normalize();
+            Files.createDirectories(archiveRoot);
+            workspaceMaterializer.ensureNoSymbolicLink(archiveRoot);
+            Path archivePath = archiveRoot.resolve(workspace.getId() + "-" + new SimpleDateFormat("yyyyMMddHHmmss").format(new Date())).normalize();
+            if (!archivePath.startsWith(archiveRoot)) {
+                throw new JeecgBootException("Workspace archive path is outside archive root");
+            }
+            moveDirectory(source, archivePath);
+            workspace.setPath(archivePath.toString());
+            workspace.setRemark("Archived from: " + originalPath);
+        } catch (IOException e) {
+            throw new JeecgBootException("Archive workspace failed: " + e.getMessage(), e);
+        }
+    }
+
+    private void moveDirectory(Path source, Path archivePath) throws IOException {
+        try {
+            Files.move(source, archivePath, StandardCopyOption.ATOMIC_MOVE);
+        } catch (IOException atomicMoveError) {
+            Files.move(source, archivePath);
+        }
     }
 
     @Override
