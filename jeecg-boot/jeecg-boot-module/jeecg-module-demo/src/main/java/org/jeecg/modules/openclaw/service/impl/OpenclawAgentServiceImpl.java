@@ -23,6 +23,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.util.Map;
 import java.util.Set;
 
 @Service
@@ -48,7 +49,7 @@ public class OpenclawAgentServiceImpl extends ServiceImpl<OpenclawAgentMapper, O
     private OpenclawWorkspaceMaterializer workspaceMaterializer;
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
+    @Transactional(rollbackFor = Exception.class, noRollbackFor = OpenclawAgentProvisionException.class)
     public OpenclawAgent createAgent(OpenclawAgentCreateDTO dto) {
         LoginUser user = permissionService.currentUser();
         validateAgentCreateRequest(user, dto);
@@ -79,10 +80,16 @@ public class OpenclawAgentServiceImpl extends ServiceImpl<OpenclawAgentMapper, O
         agent.setConfigJson(dto.getConfigJson());
         agent.setRemark(dto.getRemark());
         agent.setDelFlag(OpenclawConstants.DEL_FLAG_NORMAL);
-        workspaceMaterializer.materialize(agent, workspace);
-        workspace.setStatus(OpenclawConstants.WORKSPACE_STATUS_READY);
-        workspaceService.updateById(workspace);
         save(agent);
+        try {
+            workspaceMaterializer.materialize(agent, workspace);
+            workspace.setStatus(OpenclawConstants.WORKSPACE_STATUS_READY);
+            workspace.setRemark(null);
+            workspaceService.updateById(workspace);
+        } catch (RuntimeException e) {
+            markAgentCreateFailed(agent, workspace, e);
+            throw new OpenclawAgentProvisionException("Create OpenClaw agent workspace failed: " + e.getMessage(), e);
+        }
         auditLogService.log("agent_create", "agent", agent.getId(), agent);
         return agent;
     }
@@ -142,6 +149,21 @@ public class OpenclawAgentServiceImpl extends ServiceImpl<OpenclawAgentMapper, O
 
     private String generateAgentKey() {
         return "agt_" + IdWorker.getIdStr();
+    }
+
+    private void markAgentCreateFailed(OpenclawAgent agent, OpenclawWorkspace workspace, RuntimeException e) {
+        String message = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+        agent.setStatus(OpenclawConstants.AGENT_STATUS_ERROR);
+        agent.setRemark(message);
+        updateById(agent);
+        workspace.setStatus(OpenclawConstants.WORKSPACE_STATUS_ERROR);
+        workspace.setRemark(message);
+        workspaceService.updateById(workspace);
+        auditLogService.logFailure("agent_create", "agent", agent.getId(), Map.of(
+            "agentId", agent.getId(),
+            "workspaceId", workspace.getId(),
+            "error", message
+        ));
     }
 
     private void validateAgentCreateRequest(LoginUser user, OpenclawAgentCreateDTO dto) {
@@ -208,5 +230,11 @@ public class OpenclawAgentServiceImpl extends ServiceImpl<OpenclawAgentMapper, O
             throw new JeecgBootException("Unsupported Agent status: " + status);
         }
         return normalized;
+    }
+
+    private static class OpenclawAgentProvisionException extends JeecgBootException {
+        private OpenclawAgentProvisionException(String message, Throwable cause) {
+            super(message, cause);
+        }
     }
 }
