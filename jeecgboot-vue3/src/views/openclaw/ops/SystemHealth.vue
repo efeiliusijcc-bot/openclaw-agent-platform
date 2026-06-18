@@ -33,6 +33,9 @@
           <template v-if="column.dataIndex === 'path'">
             <a-typography-text code>{{ record.path }}</a-typography-text>
           </template>
+          <template v-if="column.dataIndex === 'symbolicLink'">
+            <a-tag :color="record.symbolicLink ? 'red' : 'green'">{{ record.symbolicLink ? 'YES' : 'NO' }}</a-tag>
+          </template>
         </template>
       </a-table>
     </a-card>
@@ -86,6 +89,7 @@
     { title: '名称', dataIndex: 'name', width: 180 },
     { title: '状态', dataIndex: 'status', width: 100 },
     { title: '路径', dataIndex: 'path' },
+    { title: 'Symlink', dataIndex: 'symbolicLink', width: 100 },
     { title: '信息', dataIndex: 'message', width: 240 },
   ];
   const gatewayColumns = [

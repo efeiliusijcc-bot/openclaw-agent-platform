@@ -47,6 +47,7 @@ public class OpenclawSystemHealthVO {
         private String status;
         private Boolean exists;
         private Boolean directory;
+        private Boolean symbolicLink;
         private Boolean readable;
         private Boolean writable;
         private String message;

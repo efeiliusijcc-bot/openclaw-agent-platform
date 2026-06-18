@@ -217,16 +217,21 @@ public class OpenclawSystemHealthServiceImpl implements IOpenclawSystemHealthSer
             Path path = Paths.get(value).toAbsolutePath().normalize();
             boolean exists = Files.exists(path);
             boolean directory = exists && Files.isDirectory(path);
+            boolean symbolicLink = exists && Files.isSymbolicLink(path);
             boolean readable = exists && Files.isReadable(path);
             boolean writable = exists && Files.isWritable(path);
             item.setPath(path.toString());
             item.setExists(exists);
             item.setDirectory(directory);
+            item.setSymbolicLink(symbolicLink);
             item.setReadable(readable);
             item.setWritable(writable);
             if (!exists) {
                 item.setStatus(STATUS_DOWN);
                 item.setMessage("Path does not exist");
+            } else if (symbolicLink) {
+                item.setStatus(STATUS_DOWN);
+                item.setMessage("Symbolic links are not allowed");
             } else if (directoryExpected && !directory) {
                 item.setStatus(STATUS_DOWN);
                 item.setMessage("Directory expected");
