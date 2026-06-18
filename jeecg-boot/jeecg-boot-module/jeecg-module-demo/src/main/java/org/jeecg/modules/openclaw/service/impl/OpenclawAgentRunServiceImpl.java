@@ -543,7 +543,7 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
         }
         var runningRunQuery = lambdaQuery()
             .eq(OpenclawAgentRun::getUserId, user.getId())
-            .eq(OpenclawAgentRun::getStatus, OpenclawConstants.RUN_STATUS_RUNNING)
+            .in(OpenclawAgentRun::getStatus, OpenclawConstants.RUN_STATUS_QUEUED, OpenclawConstants.RUN_STATUS_RUNNING)
             .eq(OpenclawAgentRun::getDelFlag, OpenclawConstants.DEL_FLAG_NORMAL);
         if (StringUtils.hasText(currentRunId)) {
             runningRunQuery.ne(OpenclawAgentRun::getId, currentRunId);

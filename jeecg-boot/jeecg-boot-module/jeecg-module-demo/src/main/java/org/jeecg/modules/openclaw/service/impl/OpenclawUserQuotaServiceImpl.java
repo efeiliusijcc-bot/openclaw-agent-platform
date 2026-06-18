@@ -30,9 +30,15 @@ import org.springframework.util.StringUtils;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.Date;
+import java.util.Set;
 
 @Service
 public class OpenclawUserQuotaServiceImpl extends ServiceImpl<OpenclawUserQuotaMapper, OpenclawUserQuota> implements IOpenclawUserQuotaService {
+    private static final Set<String> QUOTA_STATUSES = Set.of(
+        OpenclawConstants.STATUS_ENABLED,
+        OpenclawConstants.STATUS_DISABLED
+    );
+
     @Autowired
     private IOpenclawPermissionService permissionService;
     @Autowired
@@ -121,6 +127,7 @@ public class OpenclawUserQuotaServiceImpl extends ServiceImpl<OpenclawUserQuotaM
         if (quota.getMaxConcurrentRuns() == null) {
             quota.setMaxConcurrentRuns(2);
         }
+        validateQuota(quota);
         saveOrUpdate(quota);
         auditLogService.logSuccess(created ? "quota_create" : "quota_update", "quota", quota.getId(), quotaAuditDetail(before, quota));
     }
@@ -167,8 +174,49 @@ public class OpenclawUserQuotaServiceImpl extends ServiceImpl<OpenclawUserQuotaM
     private LambdaQueryWrapper<OpenclawAgentRun> runningRunWrapper(String userId) {
         return new LambdaQueryWrapper<OpenclawAgentRun>()
             .eq(OpenclawAgentRun::getUserId, userId)
-            .eq(OpenclawAgentRun::getStatus, OpenclawConstants.RUN_STATUS_RUNNING)
+            .in(OpenclawAgentRun::getStatus, OpenclawConstants.RUN_STATUS_QUEUED, OpenclawConstants.RUN_STATUS_RUNNING)
             .eq(OpenclawAgentRun::getDelFlag, OpenclawConstants.DEL_FLAG_NORMAL);
+    }
+
+    private void validateQuota(OpenclawUserQuota quota) {
+        quota.setStatus(normalizeQuotaStatus(quota.getStatus()));
+        validateNonNegative("maxAgents", quota.getMaxAgents());
+        validateNonNegative("maxWorkspaces", quota.getMaxWorkspaces());
+        validateNonNegative("maxSkills", quota.getMaxSkills());
+        validateNonNegative("maxStorageMb", quota.getMaxStorageMb());
+        validateNonNegative("maxDailyRuns", quota.getMaxDailyRuns());
+        validateNonNegative("maxConcurrentRuns", quota.getMaxConcurrentRuns());
+
+        int usedAgents = Math.toIntExact(agentMapper.selectCount(ownerAgentWrapper(quota.getUserId())));
+        int usedWorkspaces = Math.toIntExact(workspaceMapper.selectCount(ownerWorkspaceWrapper(quota.getUserId())));
+        int usedSkills = Math.toIntExact(skillMapper.selectCount(ownerSkillWrapper(quota.getUserId())));
+        int todayRuns = Math.toIntExact(runMapper.selectCount(todayRunWrapper(quota.getUserId())));
+        int runningRuns = Math.toIntExact(runMapper.selectCount(runningRunWrapper(quota.getUserId())));
+        validateNotBelowUsage("maxAgents", quota.getMaxAgents(), usedAgents);
+        validateNotBelowUsage("maxWorkspaces", quota.getMaxWorkspaces(), usedWorkspaces);
+        validateNotBelowUsage("maxSkills", quota.getMaxSkills(), usedSkills);
+        validateNotBelowUsage("maxDailyRuns", quota.getMaxDailyRuns(), todayRuns);
+        validateNotBelowUsage("maxConcurrentRuns", quota.getMaxConcurrentRuns(), runningRuns);
+    }
+
+    private String normalizeQuotaStatus(String status) {
+        String normalized = StringUtils.hasText(status) ? status.trim().toLowerCase() : OpenclawConstants.STATUS_ENABLED;
+        if (!QUOTA_STATUSES.contains(normalized)) {
+            throw new JeecgBootException("Unsupported quota status: " + status);
+        }
+        return normalized;
+    }
+
+    private void validateNonNegative(String label, Integer value) {
+        if (value != null && value < 0) {
+            throw new JeecgBootException(label + " must not be negative");
+        }
+    }
+
+    private void validateNotBelowUsage(String label, Integer limit, int used) {
+        if (limit != null && limit < used) {
+            throw new JeecgBootException(label + " cannot be lower than current usage: " + used);
+        }
     }
 
     private JSONObject quotaAuditDetail(JSONObject before, OpenclawUserQuota after) {
