@@ -117,14 +117,14 @@ public class OpenclawAgentController {
 
     @PostMapping("/{id}/run-test")
     @AutoLog(value = "OpenClaw Agent run test")
-    @RequiresPermissions("openclaw:agent:list")
+    @RequiresPermissions("openclaw:agent:run")
     public Result<OpenclawAgentRunResultVO> runTest(@PathVariable String id, @RequestBody OpenclawAgentRunTestDTO dto) {
         return Result.OK(agentRunService.runTest(id, dto));
     }
 
     @PostMapping(value = "/{id}/chat/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     @AutoLog(value = "OpenClaw Agent chat stream")
-    @RequiresPermissions("openclaw:agent:list")
+    @RequiresPermissions("openclaw:agent:chat")
     public SseEmitter chatStream(@PathVariable String id, @RequestBody OpenclawAgentRunTestDTO dto) {
         return agentRunService.chatStream(id, dto);
     }

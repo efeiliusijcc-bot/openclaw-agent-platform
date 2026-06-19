@@ -241,8 +241,8 @@
   function actions(record) {
     return [
       { label: '编辑', auth: 'openclaw:agent:edit', onClick: () => openEdit(record) },
-      { label: '运行测试', onClick: () => openRunTest(record) },
-      { label: '实时对话', onClick: () => openChat(record) },
+      { label: '运行测试', auth: 'openclaw:agent:run', onClick: () => openRunTest(record) },
+      { label: '实时对话', auth: 'openclaw:agent:chat', onClick: () => openChat(record) },
       { label: '绑定 Skill', auth: 'openclaw:agent:bindSkill', onClick: () => openBind(record) },
       { label: '运行记录', onClick: () => router.push({ path: '/openclaw/run', query: { agentId: record.id } }) },
       {
