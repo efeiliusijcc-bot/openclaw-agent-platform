@@ -1,5 +1,7 @@
 package org.jeecg.modules.openclaw.service.impl;
 
+import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONObject;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import org.jeecg.common.exception.JeecgBootException;
@@ -26,6 +28,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
+import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.List;
@@ -277,9 +280,47 @@ public class OpenclawWorkspaceServiceImpl extends ServiceImpl<OpenclawWorkspaceM
             } else if (Files.isSymbolicLink(skillPath)) {
                 result.getErrors().add("Bound skill path must not be symbolic link: " + skill.getSlug());
             } else {
+                try {
+                    workspaceMaterializer.ensureNoSymbolicLink(skillPath);
+                } catch (IOException e) {
+                    result.getErrors().add("Bound skill path is not safe: " + skill.getSlug() + ", " + e.getMessage());
+                    continue;
+                }
                 result.getCheckedItems().add("skills/" + skill.getSlug());
                 checkReadable(skillPath, "skills/" + skill.getSlug(), result);
+                checkSkillManifest(skill, skillPath, result);
             }
+        }
+    }
+
+    private void checkSkillManifest(OpenclawSkill skill, Path skillPath, OpenclawWorkspaceHealthCheckVO result) {
+        Path manifestPath = skillPath.resolve("manifest.json").normalize();
+        if (!manifestPath.startsWith(skillPath)) {
+            result.getErrors().add("Bound skill manifest path is invalid: " + skill.getSlug());
+            return;
+        }
+        if (!Files.isRegularFile(manifestPath)) {
+            result.getErrors().add("Bound skill manifest is missing: " + skill.getSlug());
+            return;
+        }
+        if (Files.isSymbolicLink(manifestPath)) {
+            result.getErrors().add("Bound skill manifest must not be symbolic link: " + skill.getSlug());
+            return;
+        }
+        checkReadable(manifestPath, "skills/" + skill.getSlug() + "/manifest.json", result);
+        try {
+            JSONObject manifest = JSON.parseObject(Files.readString(manifestPath, StandardCharsets.UTF_8));
+            String manifestSlug = manifest.getString("slug");
+            String manifestVersion = manifest.getString("version");
+            if (!skill.getSlug().equals(manifestSlug)) {
+                result.getErrors().add("Bound skill manifest slug mismatch: " + skill.getSlug());
+            }
+            if (skill.getVersion() != null && !skill.getVersion().equals(manifestVersion)) {
+                result.getErrors().add("Bound skill manifest version mismatch: " + skill.getSlug());
+            }
+            result.getCheckedItems().add("skills/" + skill.getSlug() + "/manifest.json metadata");
+        } catch (Exception e) {
+            result.getErrors().add("Bound skill manifest is invalid: " + skill.getSlug() + ", " + e.getMessage());
         }
     }
 
