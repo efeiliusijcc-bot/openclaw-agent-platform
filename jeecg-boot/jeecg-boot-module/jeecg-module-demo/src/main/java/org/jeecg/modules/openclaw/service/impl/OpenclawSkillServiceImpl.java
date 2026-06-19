@@ -276,7 +276,7 @@ public class OpenclawSkillServiceImpl extends ServiceImpl<OpenclawSkillMapper, O
         if (skill == null || Integer.valueOf(OpenclawConstants.DEL_FLAG_DELETED).equals(skill.getDelFlag())) {
             throw new JeecgBootException("Skill does not exist");
         }
-        permissionService.checkOwnerOrAdmin(skill.getOwnerUserId());
+        checkQualityAccess(skill);
         Path skillPath = Paths.get(skill.getPath()).normalize();
         OpenclawSkillQualityCheckVO result = new OpenclawSkillQualityCheckVO();
         if (!Files.exists(skillPath) || !Files.isDirectory(skillPath)) {
@@ -304,6 +304,14 @@ public class OpenclawSkillServiceImpl extends ServiceImpl<OpenclawSkillMapper, O
         result.getChecklist().add("manifest.json exists for tooling");
         result.getChecklist().add("No blocked executable file types");
         return result;
+    }
+
+    private void checkQualityAccess(OpenclawSkill skill) {
+        LoginUser user = permissionService.currentUser();
+        if (permissionService.isSkillReviewer(user)) {
+            return;
+        }
+        permissionService.checkOwnerOrAdmin(skill.getOwnerUserId());
     }
 
     @Override
