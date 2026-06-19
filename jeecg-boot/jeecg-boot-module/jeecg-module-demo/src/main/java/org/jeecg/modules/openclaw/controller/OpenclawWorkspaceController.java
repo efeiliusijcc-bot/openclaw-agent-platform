@@ -52,13 +52,13 @@ public class OpenclawWorkspaceController {
     }
 
     @GetMapping("/{id}/health-check")
-    @RequiresPermissions("openclaw:workspace:list")
+    @RequiresPermissions("openclaw:workspace:health")
     public Result<OpenclawWorkspaceHealthCheckVO> healthCheck(@PathVariable String id) {
         return Result.OK(workspaceService.healthCheck(id));
     }
 
     @PostMapping("/{id}/rematerialize")
-    @RequiresPermissions("openclaw:workspace:list")
+    @RequiresPermissions("openclaw:workspace:rematerialize")
     public Result<OpenclawWorkspaceHealthCheckVO> rematerialize(@PathVariable String id) {
         return Result.OK(workspaceService.rematerialize(id));
     }

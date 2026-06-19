@@ -44,10 +44,10 @@
 
   function actions(record) {
     return [
-      { label: 'Health Check', auth: 'openclaw:workspace:list', onClick: () => openHealthCheck(record) },
+      { label: 'Health Check', auth: 'openclaw:workspace:health', onClick: () => openHealthCheck(record) },
       {
         label: 'Rematerialize',
-        auth: 'openclaw:workspace:list',
+        auth: 'openclaw:workspace:rematerialize',
         popConfirm: {
           title: 'Regenerate base files for this workspace?',
           confirm: () => rematerialize(record),
