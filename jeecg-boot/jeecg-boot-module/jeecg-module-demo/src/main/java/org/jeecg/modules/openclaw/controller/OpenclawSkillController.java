@@ -86,7 +86,7 @@ public class OpenclawSkillController {
     }
 
     @GetMapping("/{id}/quality-check")
-    @RequiresPermissions("openclaw:skill:export")
+    @RequiresPermissions("openclaw:skill:quality")
     public Result<OpenclawSkillQualityCheckVO> qualityCheck(@PathVariable String id) {
         return Result.OK(skillService.checkSkillQuality(id));
     }

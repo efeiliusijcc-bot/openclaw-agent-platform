@@ -79,7 +79,7 @@
   function actions(record) {
     return [
       { label: '编辑', auth: 'openclaw:skill:edit', onClick: () => openEdit(record) },
-      { label: '质量检查', auth: 'openclaw:skill:export', onClick: () => showQuality(record) },
+      { label: '质量检查', auth: 'openclaw:skill:quality', onClick: () => showQuality(record) },
       { label: '导出', auth: 'openclaw:skill:export', onClick: () => exportSkill(record) },
       {
         label: '删除',
