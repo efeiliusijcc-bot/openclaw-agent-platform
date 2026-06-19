@@ -29,6 +29,19 @@
     <a-modal v-model:open="previewVisible" title="Gateway 配置预览" :footer="null" destroyOnClose width="900px">
       <a-textarea v-model:value="previewContent" :rows="22" readonly />
     </a-modal>
+
+    <a-modal v-model:open="syncVisible" title="Gateway 同步结果" :footer="null" destroyOnClose width="760px">
+      <a-descriptions size="small" bordered :column="2">
+        <a-descriptions-item label="Gateway ID">{{ syncResult.gatewayId || '-' }}</a-descriptions-item>
+        <a-descriptions-item label="需重启">{{ syncResult.restartRequired ? '是' : '否' }}</a-descriptions-item>
+        <a-descriptions-item label="Agent 数">{{ syncResult.agentCount ?? 0 }}</a-descriptions-item>
+        <a-descriptions-item label="Skill 数">{{ syncResult.skillCount ?? 0 }}</a-descriptions-item>
+        <a-descriptions-item label="Checksum" :span="2">{{ syncResult.checksum || '-' }}</a-descriptions-item>
+        <a-descriptions-item label="配置文件" :span="2">{{ syncResult.configPath || '-' }}</a-descriptions-item>
+        <a-descriptions-item label="Workspace 根目录" :span="2">{{ syncResult.workspaceRoot || '-' }}</a-descriptions-item>
+        <a-descriptions-item label="信息" :span="2">{{ syncResult.message || '-' }}</a-descriptions-item>
+      </a-descriptions>
+    </a-modal>
   </div>
 </template>
 
@@ -42,7 +55,9 @@
   const { createMessage } = useMessage();
   const visible = ref(false);
   const previewVisible = ref(false);
+  const syncVisible = ref(false);
   const previewContent = ref('');
+  const syncResult = ref<any>({});
   const form = reactive<any>({});
   const statusOptions = [
     { label: 'online', value: 'online' },
@@ -62,6 +77,12 @@
       { title: 'Workspace 根目录', dataIndex: 'workspaceRoot', width: 260, ellipsis: true },
       { title: '最大 Agent', dataIndex: 'maxAgents', width: 110 },
       { title: '当前 Agent', dataIndex: 'currentAgents', width: 110 },
+      {
+        title: '并发运行',
+        dataIndex: 'currentRunning',
+        width: 120,
+        customRender: ({ record }) => capacityText(record.currentRunning, record.maxConcurrentRuns),
+      },
       { title: '同步状态', dataIndex: 'lastSyncStatus', width: 110 },
       { title: '最近同步', dataIndex: 'lastSyncTime', width: 170 },
       { title: '同步信息', dataIndex: 'lastSyncMessage', width: 240, ellipsis: true },
@@ -117,9 +138,16 @@
 
   async function syncGateway(record) {
     const result: any = await syncGatewayConfig(record.id);
-    const message = result?.message || result?.result?.message || '配置已写入，当前版本需要手动重启 OpenClaw Gateway';
+    syncResult.value = result?.result || result || {};
+    const message = syncResult.value?.message || result?.message || '配置已写入，当前版本需要手动重启 OpenClaw Gateway';
     createMessage.success(message);
+    syncVisible.value = true;
     reload();
+  }
+
+  function capacityText(current?: number, max?: number) {
+    const used = current ?? 0;
+    return max && max > 0 ? `${used}/${max}` : `${used}/∞`;
   }
 
   function actions(record) {
