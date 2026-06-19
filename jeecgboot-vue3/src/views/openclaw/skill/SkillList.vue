@@ -20,7 +20,7 @@
 </template>
 
 <script lang="ts" setup name="OpenclawSkillList">
-  import { reactive, ref } from 'vue';
+  import { h, reactive, ref } from 'vue';
   import { Modal } from 'ant-design-vue';
   import { BasicTable, TableAction, useTable } from '/@/components/Table';
   import { useMessage } from '/@/hooks/web/useMessage';
@@ -97,11 +97,39 @@
 
   async function showQuality(record) {
     const result = await checkSkillQuality(record.id);
-    const missing = result.missingFiles?.length ? `\n缺失文件: ${result.missingFiles.join(', ')}` : '';
-    const warnings = result.warnings?.length ? `\n风险提示: ${result.warnings.join('; ')}` : '';
+    const missingFiles = result.missingFiles || [];
+    const warnings = result.warnings || [];
+    const checklist = result.checklist || [];
     Modal.info({
       title: result.passed ? 'Skill 交付检查通过' : 'Skill 交付检查需要处理',
-      content: `评分: ${result.score || 0} / 100` + `\n文件数: ${result.fileCount || 0}` + `\n大小: ${result.totalSize || 0} bytes` + missing + warnings,
+      width: 760,
+      content: h('div', { class: 'quality-result' }, [
+        h('p', `评分: ${result.score || 0} / 100`),
+        h('p', `文件数: ${result.fileCount || 0}`),
+        h('p', `大小: ${result.totalSize || 0} bytes`),
+        missingFiles.length ? h('p', { class: 'quality-error' }, `缺失文件: ${missingFiles.join(', ')}`) : null,
+        warnings.length ? h('p', { class: 'quality-warning' }, `风险提示: ${warnings.join('; ')}`) : null,
+        checklist.length ? h('div', [h('p', '检查清单:'), h('ul', checklist.map((item) => h('li', item)))]) : null,
+      ]),
     });
   }
 </script>
+
+<style scoped>
+  .quality-result :deep(p) {
+    margin: 0 0 8px;
+  }
+
+  .quality-result :deep(ul) {
+    margin: 0;
+    padding-left: 20px;
+  }
+
+  .quality-error {
+    color: #cf1322;
+  }
+
+  .quality-warning {
+    color: #d48806;
+  }
+</style>
