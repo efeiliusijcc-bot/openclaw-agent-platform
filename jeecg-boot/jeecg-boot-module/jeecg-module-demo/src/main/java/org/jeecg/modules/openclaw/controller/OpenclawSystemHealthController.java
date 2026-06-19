@@ -18,7 +18,7 @@ public class OpenclawSystemHealthController {
     private IOpenclawSystemHealthService systemHealthService;
 
     @GetMapping("/health")
-    @RequiresPermissions("openclaw:gateway:list")
+    @RequiresPermissions("openclaw:system:health")
     public Result<OpenclawSystemHealthVO> health() {
         return Result.OK(systemHealthService.check());
     }
