@@ -61,6 +61,10 @@
           <template v-if="column.dataIndex === 'baseUrl'">
             <a-typography-text code>{{ record.baseUrl || '-' }}</a-typography-text>
           </template>
+          <template v-if="column.dataIndex === 'probe'">
+            <div>{{ record.probeStatusCode || '-' }} / {{ record.probeLatencyMs ?? '-' }}ms</div>
+            <div class="muted">{{ record.probeMessage || '-' }}</div>
+          </template>
           <template v-if="column.dataIndex === 'configPath'">
             <a-typography-text code>{{ record.configPath }}</a-typography-text>
           </template>
@@ -127,6 +131,7 @@
     { title: '同步状态', dataIndex: 'lastSyncStatus', width: 120 },
     { title: '最后同步', dataIndex: 'lastSyncTime', width: 170 },
     { title: 'Base URL', dataIndex: 'baseUrl', width: 220 },
+    { title: 'Probe', dataIndex: 'probe', width: 180 },
     { title: '配置文件', dataIndex: 'configPath' },
     { title: '同步信息', dataIndex: 'lastSyncMessage', width: 260 },
   ];

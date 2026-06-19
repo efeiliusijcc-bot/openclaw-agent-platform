@@ -63,6 +63,10 @@ public class OpenclawSystemHealthVO {
         private String healthStatus;
         private String healthMessage;
         private String baseUrl;
+        private String probeUrl;
+        private Integer probeStatusCode;
+        private Long probeLatencyMs;
+        private String probeMessage;
         private String configPath;
         private Integer currentAgents;
         private Integer maxAgents;

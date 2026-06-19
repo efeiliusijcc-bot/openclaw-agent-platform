@@ -25,9 +25,14 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.Duration;
 import java.util.Date;
 import java.util.List;
 
@@ -36,6 +41,11 @@ public class OpenclawSystemHealthServiceImpl implements IOpenclawSystemHealthSer
     private static final String STATUS_UP = "UP";
     private static final String STATUS_WARN = "WARN";
     private static final String STATUS_DOWN = "DOWN";
+    private static final Duration GATEWAY_PROBE_TIMEOUT = Duration.ofSeconds(3);
+
+    private final HttpClient httpClient = HttpClient.newBuilder()
+        .connectTimeout(GATEWAY_PROBE_TIMEOUT)
+        .build();
 
     @Autowired
     private IOpenclawPermissionService permissionService;
@@ -142,6 +152,7 @@ public class OpenclawSystemHealthServiceImpl implements IOpenclawSystemHealthSer
         item.setLastSyncTime(node.getLastSyncTime());
         item.setRestartRequired(Integer.valueOf(1).equals(node.getRestartRequired()));
         item.setConfigFile(pathHealth("gatewayConfig:" + node.getId(), configPath(node), false));
+        probeGateway(item);
         fillGatewayStatus(item);
         return item;
     }
@@ -165,6 +176,11 @@ public class OpenclawSystemHealthServiceImpl implements IOpenclawSystemHealthSer
         if (!StringUtils.hasText(item.getBaseUrl())) {
             item.setHealthStatus(STATUS_WARN);
             item.setHealthMessage("Gateway base URL is empty");
+            return;
+        }
+        if (StringUtils.hasText(item.getProbeMessage()) && item.getProbeMessage().startsWith("DOWN:")) {
+            item.setHealthStatus(STATUS_DOWN);
+            item.setHealthMessage("Gateway probe failed: " + item.getProbeMessage());
             return;
         }
         if (item.getConfigFile() != null && STATUS_DOWN.equals(item.getConfigFile().getStatus())) {
@@ -197,7 +213,47 @@ public class OpenclawSystemHealthServiceImpl implements IOpenclawSystemHealthSer
             return;
         }
         item.setHealthStatus(STATUS_UP);
-        item.setHealthMessage("Gateway config is synced");
+        item.setHealthMessage("Gateway config is synced; " + firstText(item.getProbeMessage(), "probe skipped"));
+    }
+
+    private void probeGateway(OpenclawSystemHealthVO.GatewayHealth item) {
+        if (!OpenclawConstants.GATEWAY_STATUS_ONLINE.equals(item.getStatus()) || !StringUtils.hasText(item.getBaseUrl())) {
+            item.setProbeMessage("probe skipped");
+            return;
+        }
+        long started = System.currentTimeMillis();
+        try {
+            String probeUrl = gatewayProbeUrl(item.getBaseUrl());
+            item.setProbeUrl(probeUrl);
+            HttpRequest request = HttpRequest.newBuilder(URI.create(probeUrl))
+                .timeout(GATEWAY_PROBE_TIMEOUT)
+                .GET()
+                .build();
+            HttpResponse<Void> response = httpClient.send(request, HttpResponse.BodyHandlers.discarding());
+            item.setProbeStatusCode(response.statusCode());
+            item.setProbeLatencyMs(System.currentTimeMillis() - started);
+            if (response.statusCode() >= 500) {
+                item.setProbeMessage("DOWN: HTTP " + response.statusCode());
+            } else {
+                item.setProbeMessage("reachable: HTTP " + response.statusCode());
+            }
+        } catch (Exception e) {
+            item.setProbeLatencyMs(System.currentTimeMillis() - started);
+            item.setProbeMessage("DOWN: " + trim(e.getMessage()));
+        }
+    }
+
+    private String gatewayProbeUrl(String baseUrl) {
+        String value = baseUrl.trim();
+        if (value.startsWith("ws://")) {
+            value = "http://" + value.substring(5);
+        } else if (value.startsWith("wss://")) {
+            value = "https://" + value.substring(6);
+        }
+        while (value.endsWith("/")) {
+            value = value.substring(0, value.length() - 1);
+        }
+        return value + "/health";
     }
 
     private OpenclawAgentRun latestFailedRun() {
