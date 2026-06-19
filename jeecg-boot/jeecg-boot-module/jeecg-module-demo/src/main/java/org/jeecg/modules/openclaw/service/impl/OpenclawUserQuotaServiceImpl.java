@@ -145,13 +145,32 @@ public class OpenclawUserQuotaServiceImpl extends ServiceImpl<OpenclawUserQuotaM
     @Override
     public OpenclawQuotaUsageVO getMyUsage() {
         LoginUser user = permissionService.currentUser();
+        return buildUsage(user.getId(), getOrCreateQuota(user));
+    }
+
+    @Override
+    public OpenclawQuotaUsageVO getUsageByUserId(String userId) {
+        if (!StringUtils.hasText(userId)) {
+            throw new JeecgBootException("userId cannot be empty");
+        }
+        OpenclawUserQuota quota = lambdaQuery()
+            .eq(OpenclawUserQuota::getUserId, userId)
+            .eq(OpenclawUserQuota::getDelFlag, OpenclawConstants.DEL_FLAG_NORMAL)
+            .one();
+        if (quota == null) {
+            throw new JeecgBootException("quota not found for user: " + userId);
+        }
+        return buildUsage(userId, quota);
+    }
+
+    private OpenclawQuotaUsageVO buildUsage(String userId, OpenclawUserQuota quota) {
         OpenclawQuotaUsageVO vo = new OpenclawQuotaUsageVO();
-        vo.setQuota(getOrCreateQuota(user));
-        vo.setUsedAgents(Math.toIntExact(agentMapper.selectCount(ownerAgentWrapper(user.getId()))));
-        vo.setUsedWorkspaces(Math.toIntExact(workspaceMapper.selectCount(ownerWorkspaceWrapper(user.getId()))));
-        vo.setUsedSkills(Math.toIntExact(skillMapper.selectCount(ownerSkillWrapper(user.getId()))));
-        vo.setTodayRuns(Math.toIntExact(runMapper.selectCount(todayRunWrapper(user.getId()))));
-        vo.setRunningRuns(Math.toIntExact(runMapper.selectCount(runningRunWrapper(user.getId()))));
+        vo.setQuota(quota);
+        vo.setUsedAgents(Math.toIntExact(agentMapper.selectCount(ownerAgentWrapper(userId))));
+        vo.setUsedWorkspaces(Math.toIntExact(workspaceMapper.selectCount(ownerWorkspaceWrapper(userId))));
+        vo.setUsedSkills(Math.toIntExact(skillMapper.selectCount(ownerSkillWrapper(userId))));
+        vo.setTodayRuns(Math.toIntExact(runMapper.selectCount(todayRunWrapper(userId))));
+        vo.setRunningRuns(Math.toIntExact(runMapper.selectCount(runningRunWrapper(userId))));
         return vo;
     }
 

@@ -12,4 +12,6 @@ public interface IOpenclawUserQuotaService extends IService<OpenclawUserQuota> {
     void updateQuota(OpenclawQuotaUpdateDTO dto);
 
     OpenclawQuotaUsageVO getMyUsage();
+
+    OpenclawQuotaUsageVO getUsageByUserId(String userId);
 }

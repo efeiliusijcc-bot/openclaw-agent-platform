@@ -30,6 +30,7 @@ export const getRunDetail = (id: string) => defHttp.get({ url: `/openclaw/run/${
 export const listQuotas = (params) => defHttp.get({ url: '/openclaw/quota/list', params });
 export const myQuota = () => defHttp.get({ url: '/openclaw/quota/my' });
 export const myQuotaUsage = () => defHttp.get({ url: '/openclaw/quota/myUsage' });
+export const getQuotaUsage = (params) => defHttp.get({ url: '/openclaw/quota/usage', params });
 export const editQuota = (params) => defHttp.post({ url: '/openclaw/quota/edit', params });
 
 export const listGateways = (params) => defHttp.get({ url: '/openclaw/gateway/list', params });

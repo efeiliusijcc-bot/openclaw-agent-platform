@@ -54,6 +54,15 @@ public class OpenclawQuotaController {
         return Result.OK(quotaService.getMyUsage());
     }
 
+    @GetMapping("/usage")
+    @RequiresPermissions("openclaw:quota:list")
+    public Result<OpenclawQuotaUsageVO> usage(@RequestParam("userId") String userId) {
+        if (!permissionService.isAdmin(permissionService.currentUser())) {
+            throw new JeecgBootException("只有 OpenClaw 管理员可以查看全部配额用量");
+        }
+        return Result.OK(quotaService.getUsageByUserId(userId));
+    }
+
     @RequestMapping(value = "/edit", method = {RequestMethod.PUT, RequestMethod.POST})
     @RequiresPermissions("openclaw:quota:edit")
     public Result<?> edit(@RequestBody OpenclawQuotaUpdateDTO dto) {
