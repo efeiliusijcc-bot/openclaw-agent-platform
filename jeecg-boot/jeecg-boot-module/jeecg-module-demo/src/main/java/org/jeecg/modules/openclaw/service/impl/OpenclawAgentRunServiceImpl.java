@@ -456,16 +456,11 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
         if (agent == null || Integer.valueOf(OpenclawConstants.DEL_FLAG_DELETED).equals(agent.getDelFlag())) {
             throw new JeecgBootException("Agent does not exist");
         }
-        if (!OpenclawConstants.AGENT_STATUS_ENABLED.equals(agent.getStatus())) {
-            throw new JeecgBootException("Agent is not enabled: " + agent.getStatus());
-        }
-        if (!StringUtils.hasText(agent.getAgentKey())) {
-            throw new JeecgBootException("Agent key is empty; sync the agent to OpenClaw Gateway first");
-        }
         return agent;
     }
 
     private void precheckRun(OpenclawAgent agent) {
+        precheckAgent(agent);
         precheckWorkspace(agent);
         precheckGateway(agent);
     }
@@ -473,65 +468,96 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
     private void precheckRunForExecution(OpenclawAgent agent) {
         try {
             precheckRun(agent);
+        } catch (RunPrecheckException e) {
+            throw e;
         } catch (JeecgBootException e) {
-            throw new RunPrecheckException(e.getMessage(), e);
+            throw new RunPrecheckException(OpenclawConstants.RUN_ERROR_PRECHECK_FAILED, e.getMessage(), e);
+        }
+    }
+
+    private void precheckAgent(OpenclawAgent agent) {
+        if (!OpenclawConstants.AGENT_STATUS_ENABLED.equals(agent.getStatus())) {
+            failPrecheck(OpenclawConstants.RUN_ERROR_AGENT_DISABLED, "Agent is not enabled: " + agent.getStatus());
+        }
+        if (!StringUtils.hasText(agent.getAgentKey())) {
+            failPrecheck(OpenclawConstants.RUN_ERROR_GATEWAY_UNAVAILABLE, "Agent key is empty; sync the agent to OpenClaw Gateway first");
         }
     }
 
     private void precheckWorkspace(OpenclawAgent agent) {
         if (!StringUtils.hasText(agent.getWorkspaceId())) {
-            throw new JeecgBootException("Agent workspace is not bound; rematerialize the workspace first");
+            failPrecheck(OpenclawConstants.RUN_ERROR_WORKSPACE_MISSING, "Agent workspace is not bound; rematerialize the workspace first");
         }
         OpenclawWorkspace workspace = workspaceMapper.selectById(agent.getWorkspaceId());
         if (workspace == null || Integer.valueOf(OpenclawConstants.DEL_FLAG_DELETED).equals(workspace.getDelFlag())) {
-            throw new JeecgBootException("Agent workspace does not exist; rematerialize the workspace first");
+            failPrecheck(OpenclawConstants.RUN_ERROR_WORKSPACE_MISSING, "Agent workspace does not exist; rematerialize the workspace first");
         }
         if (!java.util.Objects.equals(agent.getUserId(), workspace.getUserId())) {
-            throw new JeecgBootException("Agent workspace owner does not match the agent owner");
+            failPrecheck(OpenclawConstants.RUN_ERROR_WORKSPACE_ERROR, "Agent workspace owner does not match the agent owner");
         }
         if (!OpenclawConstants.WORKSPACE_STATUS_READY.equals(workspace.getStatus())) {
-            throw new JeecgBootException("Agent workspace is not ready: " + workspace.getStatus());
+            failPrecheck(OpenclawConstants.RUN_ERROR_WORKSPACE_ERROR, "Agent workspace is not ready: " + workspace.getStatus());
         }
         if (!StringUtils.hasText(workspace.getPath())) {
-            throw new JeecgBootException("Agent workspace path is empty; rematerialize the workspace first");
+            failPrecheck(OpenclawConstants.RUN_ERROR_WORKSPACE_MISSING, "Agent workspace path is empty; rematerialize the workspace first");
         }
-        Path workspacePath = normalizePath(workspace.getPath(), "Agent workspace path is invalid");
-        Path rootPath = normalizePath(OpenclawConstants.WORKSPACE_ROOT, "OpenClaw workspace root is invalid");
+        Path workspacePath = normalizePrecheckPath(workspace.getPath(), "Agent workspace path is invalid", OpenclawConstants.RUN_ERROR_WORKSPACE_ERROR);
+        Path rootPath = normalizePrecheckPath(OpenclawConstants.WORKSPACE_ROOT, "OpenClaw workspace root is invalid", OpenclawConstants.RUN_ERROR_WORKSPACE_ERROR);
         if (!workspacePath.startsWith(rootPath)) {
-            throw new JeecgBootException("Agent workspace path is outside the configured workspace root");
+            failPrecheck(OpenclawConstants.RUN_ERROR_WORKSPACE_ERROR, "Agent workspace path is outside the configured workspace root");
         }
         if (Files.isSymbolicLink(workspacePath)) {
-            throw new JeecgBootException("Agent workspace path must not be a symbolic link");
+            failPrecheck(OpenclawConstants.RUN_ERROR_WORKSPACE_ERROR, "Agent workspace path must not be a symbolic link");
         }
         if (!Files.exists(workspacePath) || !Files.isDirectory(workspacePath)) {
-            throw new JeecgBootException("Agent workspace directory is missing; rematerialize the workspace first");
+            failPrecheck(OpenclawConstants.RUN_ERROR_WORKSPACE_MISSING, "Agent workspace directory is missing; rematerialize the workspace first");
         }
     }
 
     private void precheckGateway(OpenclawAgent agent) {
         if (!StringUtils.hasText(agent.getGatewayId())) {
-            throw new JeecgBootException("Agent is not assigned to an OpenClaw Gateway; sync Gateway config first");
+            failPrecheck(OpenclawConstants.RUN_ERROR_GATEWAY_UNAVAILABLE, "Agent is not assigned to an OpenClaw Gateway; sync Gateway config first");
         }
         OpenclawGatewayNode gateway = gatewayNodeMapper.selectById(agent.getGatewayId());
         if (gateway == null || Integer.valueOf(OpenclawConstants.DEL_FLAG_DELETED).equals(gateway.getDelFlag())) {
-            throw new JeecgBootException("OpenClaw Gateway node does not exist; sync Gateway config first");
+            failPrecheck(OpenclawConstants.RUN_ERROR_GATEWAY_UNAVAILABLE, "OpenClaw Gateway node does not exist; sync Gateway config first");
         }
         if (!OpenclawConstants.GATEWAY_STATUS_ONLINE.equals(gateway.getStatus())) {
-            throw new JeecgBootException("OpenClaw Gateway node is not online: " + firstText(gateway.getStatus(), "empty"));
+            failPrecheck(OpenclawConstants.RUN_ERROR_GATEWAY_UNAVAILABLE, "OpenClaw Gateway node is not online: " + firstText(gateway.getStatus(), "empty"));
         }
         if (!StringUtils.hasText(gateway.getBaseUrl())) {
-            throw new JeecgBootException("OpenClaw Gateway base URL is empty");
+            failPrecheck(OpenclawConstants.RUN_ERROR_GATEWAY_UNAVAILABLE, "OpenClaw Gateway base URL is empty");
         }
-        normalizeGatewayBaseUrl(gateway.getBaseUrl());
+        normalizePrecheckGatewayBaseUrl(gateway.getBaseUrl());
         if (!OpenclawConstants.RUN_STATUS_SUCCESS.equals(gateway.getLastSyncStatus())) {
-            throw new JeecgBootException("OpenClaw Gateway config is not synced successfully: " + firstText(gateway.getLastSyncMessage(), gateway.getLastSyncStatus()));
+            failPrecheck(OpenclawConstants.RUN_ERROR_GATEWAY_UNAVAILABLE, "OpenClaw Gateway config is not synced successfully: " + firstText(gateway.getLastSyncMessage(), gateway.getLastSyncStatus()));
         }
         int currentRunning = gateway.getCurrentRunning() == null ? 0 : gateway.getCurrentRunning();
         if (gateway.getMaxConcurrentRuns() != null
             && gateway.getMaxConcurrentRuns() > 0
             && currentRunning >= gateway.getMaxConcurrentRuns()) {
-            throw new JeecgBootException("OpenClaw Gateway concurrent run capacity exceeded: "
+            failPrecheck(OpenclawConstants.RUN_ERROR_GATEWAY_UNAVAILABLE, "OpenClaw Gateway concurrent run capacity exceeded: "
                 + currentRunning + "/" + gateway.getMaxConcurrentRuns());
+        }
+    }
+
+    private void failPrecheck(String errorType, String message) {
+        throw new RunPrecheckException(errorType, message);
+    }
+
+    private Path normalizePrecheckPath(String value, String errorMessage, String errorType) {
+        try {
+            return normalizePath(value, errorMessage);
+        } catch (JeecgBootException e) {
+            throw new RunPrecheckException(errorType, e.getMessage(), e);
+        }
+    }
+
+    private void normalizePrecheckGatewayBaseUrl(String baseUrl) {
+        try {
+            normalizeGatewayBaseUrl(baseUrl);
+        } catch (JeecgBootException e) {
+            throw new RunPrecheckException(OpenclawConstants.RUN_ERROR_GATEWAY_UNAVAILABLE, e.getMessage(), e);
         }
     }
 
@@ -893,7 +919,7 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
             return OpenclawConstants.RUN_ERROR_GATEWAY_TIMEOUT;
         }
         if (e instanceof RunPrecheckException) {
-            return OpenclawConstants.RUN_ERROR_PRECHECK_FAILED;
+            return ((RunPrecheckException) e).getErrorType();
         }
         if (e instanceof RunQuotaException) {
             return OpenclawConstants.RUN_ERROR_QUOTA_EXCEEDED;
@@ -942,8 +968,20 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
     }
 
     private static class RunPrecheckException extends JeecgBootException {
-        private RunPrecheckException(String message, Throwable cause) {
+        private final String errorType;
+
+        private RunPrecheckException(String errorType, String message) {
+            super(message);
+            this.errorType = StringUtils.hasText(errorType) ? errorType : OpenclawConstants.RUN_ERROR_PRECHECK_FAILED;
+        }
+
+        private RunPrecheckException(String errorType, String message, Throwable cause) {
             super(message, cause);
+            this.errorType = StringUtils.hasText(errorType) ? errorType : OpenclawConstants.RUN_ERROR_PRECHECK_FAILED;
+        }
+
+        private String getErrorType() {
+            return errorType;
         }
     }
 
