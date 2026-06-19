@@ -74,6 +74,7 @@ public class OpenclawSystemHealthServiceImpl implements IOpenclawSystemHealthSer
         health.getPaths().add(pathHealth("workspaceRoot", workspaceRoot, true));
         health.getPaths().add(pathHealth("skillRoot", skillRoot, true));
         health.setGateways(gatewayHealth());
+        health.setLatestSuccessfulRun(latestSuccessfulRun());
         health.setLatestFailedRun(latestFailedRun());
         fillSummary(health.getSummary(), health.getGateways());
         health.setHealthy(isHealthy(health));
@@ -207,8 +208,19 @@ public class OpenclawSystemHealthServiceImpl implements IOpenclawSystemHealthSer
             .last("limit 1"));
     }
 
+    private OpenclawAgentRun latestSuccessfulRun() {
+        return runMapper.selectOne(new QueryWrapper<OpenclawAgentRun>()
+            .eq("del_flag", OpenclawConstants.DEL_FLAG_NORMAL)
+            .eq("status", OpenclawConstants.RUN_STATUS_SUCCESS)
+            .orderByDesc("create_time")
+            .last("limit 1"));
+    }
+
     private void fillSummary(OpenclawSystemHealthVO.Summary summary, List<OpenclawSystemHealthVO.GatewayHealth> gateways) {
         summary.setAgents(agentMapper.selectCount(normalQuery(OpenclawAgent.class)));
+        summary.setEnabledAgents(agentMapper.selectCount(new QueryWrapper<OpenclawAgent>()
+            .eq("del_flag", OpenclawConstants.DEL_FLAG_NORMAL)
+            .eq("status", OpenclawConstants.AGENT_STATUS_ENABLED)));
         summary.setWorkspaces(workspaceMapper.selectCount(normalQuery(OpenclawWorkspace.class)));
         summary.setSkills(skillMapper.selectCount(normalQuery(OpenclawSkill.class)));
         summary.setRuns(runMapper.selectCount(normalQuery(OpenclawAgentRun.class)));

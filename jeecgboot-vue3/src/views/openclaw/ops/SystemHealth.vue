@@ -49,11 +49,35 @@
           <template v-if="column.dataIndex === 'lastSyncStatus'">
             <a-tag :color="statusColor(record.lastSyncStatus === 'success' ? 'UP' : 'WARN')">{{ record.lastSyncStatus || '-' }}</a-tag>
           </template>
+          <template v-if="column.dataIndex === 'restartRequired'">
+            <a-tag :color="record.restartRequired ? 'orange' : 'green'">{{ record.restartRequired ? 'YES' : 'NO' }}</a-tag>
+          </template>
+          <template v-if="column.dataIndex === 'agentCapacity'">
+            {{ capacityText(record.currentAgents, record.maxAgents) }}
+          </template>
+          <template v-if="column.dataIndex === 'runCapacity'">
+            {{ capacityText(record.currentRunning, record.maxConcurrentRuns) }}
+          </template>
+          <template v-if="column.dataIndex === 'baseUrl'">
+            <a-typography-text code>{{ record.baseUrl || '-' }}</a-typography-text>
+          </template>
           <template v-if="column.dataIndex === 'configPath'">
             <a-typography-text code>{{ record.configPath }}</a-typography-text>
           </template>
         </template>
       </a-table>
+    </a-card>
+
+    <a-card title="最近成功运行" size="small">
+      <a-empty v-if="!health?.latestSuccessfulRun" />
+      <a-descriptions v-else size="small" bordered :column="2">
+        <a-descriptions-item label="Run ID">{{ health.latestSuccessfulRun.id }}</a-descriptions-item>
+        <a-descriptions-item label="Agent">{{ health.latestSuccessfulRun.agentName }}</a-descriptions-item>
+        <a-descriptions-item label="状态">{{ health.latestSuccessfulRun.status }}</a-descriptions-item>
+        <a-descriptions-item label="完成时间">{{ health.latestSuccessfulRun.finishTime || health.latestSuccessfulRun.createTime }}</a-descriptions-item>
+        <a-descriptions-item label="耗时(ms)">{{ health.latestSuccessfulRun.durationMs || '-' }}</a-descriptions-item>
+        <a-descriptions-item label="模型">{{ health.latestSuccessfulRun.model || '-' }}</a-descriptions-item>
+      </a-descriptions>
     </a-card>
 
     <a-card title="最近失败运行" size="small">
@@ -97,8 +121,12 @@
     { title: 'Health Message', dataIndex: 'healthMessage', width: 260 },
     { title: '名称', dataIndex: 'name', width: 220 },
     { title: '节点状态', dataIndex: 'status', width: 100 },
+    { title: 'Agent 容量', dataIndex: 'agentCapacity', width: 120 },
+    { title: '运行容量', dataIndex: 'runCapacity', width: 120 },
+    { title: '需重启', dataIndex: 'restartRequired', width: 90 },
     { title: '同步状态', dataIndex: 'lastSyncStatus', width: 120 },
     { title: '最后同步', dataIndex: 'lastSyncTime', width: 170 },
+    { title: 'Base URL', dataIndex: 'baseUrl', width: 220 },
     { title: '配置文件', dataIndex: 'configPath' },
     { title: '同步信息', dataIndex: 'lastSyncMessage', width: 260 },
   ];
@@ -107,6 +135,7 @@
     const s = health.value?.summary || {};
     return [
       { label: 'Agents', value: s.agents || 0 },
+      { label: 'Enabled Agents', value: s.enabledAgents || 0 },
       { label: 'Workspaces', value: s.workspaces || 0 },
       { label: 'Skills', value: s.skills || 0 },
       { label: 'Runs', value: s.runs || 0 },
@@ -127,6 +156,11 @@
     }
     return rows;
   });
+
+  function capacityText(current?: number, max?: number) {
+    const used = current ?? 0;
+    return max && max > 0 ? `${used}/${max}` : `${used}/∞`;
+  }
 
   function statusColor(status: string) {
     if (status === 'UP') return 'green';

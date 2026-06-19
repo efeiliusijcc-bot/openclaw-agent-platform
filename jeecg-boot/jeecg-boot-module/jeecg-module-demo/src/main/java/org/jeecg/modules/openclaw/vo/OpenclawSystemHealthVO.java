@@ -17,11 +17,13 @@ public class OpenclawSystemHealthVO {
     private List<ComponentHealth> components = new ArrayList<>();
     private List<PathHealth> paths = new ArrayList<>();
     private List<GatewayHealth> gateways = new ArrayList<>();
+    private OpenclawAgentRun latestSuccessfulRun;
     private OpenclawAgentRun latestFailedRun;
 
     @Data
     public static class Summary {
         private Long agents;
+        private Long enabledAgents;
         private Long workspaces;
         private Long skills;
         private Long runs;
