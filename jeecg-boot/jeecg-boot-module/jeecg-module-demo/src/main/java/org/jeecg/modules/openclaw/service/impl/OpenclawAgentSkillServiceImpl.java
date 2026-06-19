@@ -1,6 +1,7 @@
 package org.jeecg.modules.openclaw.service.impl;
 
 import com.alibaba.fastjson.JSONObject;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import org.jeecg.common.exception.JeecgBootException;
 import org.jeecg.modules.openclaw.constant.OpenclawConstants;
@@ -75,7 +76,8 @@ public class OpenclawAgentSkillServiceImpl extends ServiceImpl<OpenclawAgentSkil
         binding.setDelFlag(OpenclawConstants.DEL_FLAG_NORMAL);
         saveOrUpdate(binding);
         skillMaterializer.copySkillToAgent(agent, skill);
-        auditLogService.log("agent_bind_skill", "agent_skill", binding.getId(), binding);
+        boolean gatewayAssignmentCleared = clearGatewayAssignment(agent);
+        auditLogService.log("agent_bind_skill", "agent_skill", binding.getId(), bindingAuditDetail(binding, gatewayAssignmentCleared));
     }
 
     @Override
@@ -105,7 +107,31 @@ public class OpenclawAgentSkillServiceImpl extends ServiceImpl<OpenclawAgentSkil
         updateById(binding);
         OpenclawSkill skill = skillMapper.selectById(skillId);
         skillMaterializer.removeSkillFromAgent(agent, skill);
-        auditLogService.log("agent_unbind_skill", "agent_skill", binding.getId(), binding);
+        boolean gatewayAssignmentCleared = clearGatewayAssignment(agent);
+        auditLogService.log("agent_unbind_skill", "agent_skill", binding.getId(), bindingAuditDetail(binding, gatewayAssignmentCleared));
+    }
+
+    private boolean clearGatewayAssignment(OpenclawAgent agent) {
+        if (agent == null || !StringUtils.hasText(agent.getGatewayId())) {
+            return false;
+        }
+        agentMapper.update(null, new LambdaUpdateWrapper<OpenclawAgent>()
+            .eq(OpenclawAgent::getId, agent.getId())
+            .set(OpenclawAgent::getGatewayId, null));
+        agent.setGatewayId(null);
+        return true;
+    }
+
+    private JSONObject bindingAuditDetail(OpenclawAgentSkill binding, boolean gatewayAssignmentCleared) {
+        JSONObject detail = new JSONObject();
+        detail.put("bindingId", binding.getId());
+        detail.put("agentId", binding.getAgentId());
+        detail.put("skillId", binding.getSkillId());
+        detail.put("enabled", binding.getEnabled());
+        detail.put("delFlag", binding.getDelFlag());
+        detail.put("gatewayAssignmentCleared", gatewayAssignmentCleared);
+        detail.put("gatewaySyncRequired", gatewayAssignmentCleared);
+        return detail;
     }
 
     private void auditSkillBindingFailure(String action, String agentId, String skillId, RuntimeException e) {
