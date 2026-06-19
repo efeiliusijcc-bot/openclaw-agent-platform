@@ -90,14 +90,15 @@ public class OpenclawGatewayConfigServiceImpl implements IOpenclawGatewayConfigS
             node.setLastSyncChecksum(rendered.checksum);
             node.setRestartRequired(1);
             gatewayNodeMapper.updateById(node);
+            BindingDelta bindingDelta = gatewayBindingDelta(rendered.agentIds, node.getId());
             int staleBindings = reconcileAgentGatewayBindings(rendered.agentIds, node.getId());
             OpenclawGatewaySyncResultVO result = toResult(node, rendered, "Config atomically written. Restart OpenClaw Gateway manually.", false);
-            auditLogService.logSuccess("gateway_sync", "gateway", node.getId(), syncAuditDetail(result, "success", staleBindings));
+            auditLogService.logSuccess("gateway_sync", "gateway", node.getId(), syncAuditDetail(result, "success", bindingDelta, staleBindings));
             return result;
         } catch (Exception e) {
             restoreBackup(configPath(node), backup);
             markFailed(node, e);
-            auditLogService.logFailure("gateway_sync", "gateway", node.getId(), failureDetail(e));
+            auditLogService.logFailure("gateway_sync", "gateway", node.getId(), failureDetail(node, e));
             if (e instanceof JeecgBootException) {
                 throw (JeecgBootException) e;
             }
@@ -180,6 +181,33 @@ public class OpenclawGatewayConfigServiceImpl implements IOpenclawGatewayConfigS
             staleWrapper.notIn(OpenclawAgent::getId, agentIds);
         }
         return agentMapper.update(null, staleWrapper);
+    }
+
+    private BindingDelta gatewayBindingDelta(List<String> renderedAgentIds, String gatewayId) {
+        Set<String> renderedIds = new LinkedHashSet<>(renderedAgentIds);
+        Set<String> currentIds = new LinkedHashSet<>();
+        List<OpenclawAgent> assignedAgents = agentMapper.selectList(new LambdaQueryWrapper<OpenclawAgent>()
+            .eq(OpenclawAgent::getGatewayId, gatewayId)
+            .eq(OpenclawAgent::getDelFlag, OpenclawConstants.DEL_FLAG_NORMAL));
+        for (OpenclawAgent agent : assignedAgents) {
+            currentIds.add(agent.getId());
+        }
+        BindingDelta delta = new BindingDelta();
+        delta.previousAssignedAgents = currentIds.size();
+        delta.renderedAgents = renderedIds.size();
+        for (String agentId : renderedIds) {
+            if (currentIds.contains(agentId)) {
+                delta.unchangedAgentBindings++;
+            } else {
+                delta.newAgentBindings++;
+            }
+        }
+        for (String agentId : currentIds) {
+            if (!renderedIds.contains(agentId)) {
+                delta.removedAgentBindings++;
+            }
+        }
+        return delta;
     }
 
     private OpenclawGatewayNode requireNode(String gatewayId) {
@@ -367,14 +395,18 @@ public class OpenclawGatewayConfigServiceImpl implements IOpenclawGatewayConfigS
         gatewayNodeMapper.updateById(node);
     }
 
-    private JSONObject failureDetail(Exception e) {
+    private JSONObject failureDetail(OpenclawGatewayNode node, Exception e) {
         JSONObject detail = new JSONObject(true);
         detail.put("status", "failed");
+        detail.put("gatewayId", node.getId());
+        detail.put("name", node.getName());
+        detail.put("configPath", configPath(node));
+        detail.put("workspaceRoot", workspaceRoot(node));
         detail.put("message", trim(e.getMessage(), 2000));
         return detail;
     }
 
-    private JSONObject syncAuditDetail(OpenclawGatewaySyncResultVO result, String status, int staleBindings) {
+    private JSONObject syncAuditDetail(OpenclawGatewaySyncResultVO result, String status, BindingDelta bindingDelta, int staleBindings) {
         JSONObject detail = new JSONObject(true);
         detail.put("status", status);
         detail.put("gatewayId", result.getGatewayId());
@@ -385,6 +417,11 @@ public class OpenclawGatewayConfigServiceImpl implements IOpenclawGatewayConfigS
         detail.put("checksum", result.getChecksum());
         detail.put("restartRequired", result.getRestartRequired());
         detail.put("message", result.getMessage());
+        detail.put("previousAssignedAgents", bindingDelta.previousAssignedAgents);
+        detail.put("renderedAgents", bindingDelta.renderedAgents);
+        detail.put("newAgentBindings", bindingDelta.newAgentBindings);
+        detail.put("unchangedAgentBindings", bindingDelta.unchangedAgentBindings);
+        detail.put("expectedRemovedAgentBindings", bindingDelta.removedAgentBindings);
         detail.put("staleAgentBindingsCleared", staleBindings);
         return detail;
     }
@@ -395,9 +432,17 @@ public class OpenclawGatewayConfigServiceImpl implements IOpenclawGatewayConfigS
         detail.put("name", node.getName());
         detail.put("configPath", configPath(node));
         detail.put("workspaceRoot", workspaceRoot(node));
+        detail.put("previousAssignedAgents", countAssignedAgents(node.getId()));
         detail.put("previousLastSyncStatus", node.getLastSyncStatus());
         detail.put("previousLastSyncTime", node.getLastSyncTime());
+        detail.put("previousLastSyncChecksum", node.getLastSyncChecksum());
         return detail;
+    }
+
+    private long countAssignedAgents(String gatewayId) {
+        return agentMapper.selectCount(new LambdaQueryWrapper<OpenclawAgent>()
+            .eq(OpenclawAgent::getGatewayId, gatewayId)
+            .eq(OpenclawAgent::getDelFlag, OpenclawConstants.DEL_FLAG_NORMAL));
     }
 
     private String sha256(String content) {
@@ -459,5 +504,13 @@ public class OpenclawGatewayConfigServiceImpl implements IOpenclawGatewayConfigS
 
     private static class PublishResult {
         private Path backup;
+    }
+
+    private static class BindingDelta {
+        private int previousAssignedAgents;
+        private int renderedAgents;
+        private int newAgentBindings;
+        private int unchangedAgentBindings;
+        private int removedAgentBindings;
     }
 }
