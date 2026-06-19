@@ -152,7 +152,7 @@
 
   function actions(record) {
     return [
-      { label: '预览', auth: 'openclaw:gateway:list', onClick: () => openPreview(record) },
+      { label: '预览', auth: 'openclaw:gateway:preview', onClick: () => openPreview(record) },
       { label: '同步', auth: 'openclaw:gateway:sync', onClick: () => syncGateway(record) },
       { label: '编辑', auth: 'openclaw:gateway:edit', onClick: () => openEdit(record) },
       {

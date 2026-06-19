@@ -121,7 +121,7 @@ public class OpenclawGatewayNodeController {
     }
 
     @GetMapping("/{id}/configPreview")
-    @RequiresPermissions("openclaw:gateway:list")
+    @RequiresPermissions("openclaw:gateway:preview")
     public Result<OpenclawGatewaySyncResultVO> configPreview(@PathVariable String id) {
         return Result.OK(gatewayConfigService.preview(id));
     }
