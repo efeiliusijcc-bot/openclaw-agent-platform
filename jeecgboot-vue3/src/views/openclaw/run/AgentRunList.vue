@@ -4,6 +4,12 @@
       <template #status="{ text }">
         <a-tag :color="statusColor(text)">{{ text || '-' }}</a-tag>
       </template>
+      <template #errorType="{ text }">
+        <a-tooltip v-if="text" :title="errorTypeDescription(text)">
+          <a-tag color="volcano">{{ text }}</a-tag>
+        </a-tooltip>
+        <span v-else>-</span>
+      </template>
       <template #action="{ record }">
         <TableAction :actions="[{ label: '查看详情', onClick: () => openDetail(record) }]" />
       </template>
@@ -24,7 +30,10 @@
         <a-descriptions-item label="耗时(ms)">{{ detailRecord.durationMs ?? '-' }}</a-descriptions-item>
         <a-descriptions-item label="完整输出文件">{{ detailRecord.fullOutputPath || '-' }}</a-descriptions-item>
         <a-descriptions-item label="运行日志文件">{{ detailRecord.logPath || '-' }}</a-descriptions-item>
-        <a-descriptions-item label="错误类型">{{ detailRecord.errorType || '-' }}</a-descriptions-item>
+        <a-descriptions-item label="错误类型">
+          <span>{{ detailRecord.errorType || '-' }}</span>
+          <span v-if="detailRecord.errorType" class="error-hint">{{ errorTypeDescription(detailRecord.errorType) }}</span>
+        </a-descriptions-item>
         <a-descriptions-item label="输入摘要">
           <pre class="run-text">{{ detailRecord.inputSummary || '-' }}</pre>
         </a-descriptions-item>
@@ -66,7 +75,7 @@
       { title: 'Username', dataIndex: 'username', width: 120 },
       { title: '模型', dataIndex: 'model', width: 160, ellipsis: true },
       { title: '状态', dataIndex: 'status', width: 120, slots: { customRender: 'status' } },
-      { title: '错误类型', dataIndex: 'errorType', width: 150, ellipsis: true },
+      { title: '错误类型', dataIndex: 'errorType', width: 190, slots: { customRender: 'errorType' } },
       { title: '输入摘要', dataIndex: 'inputSummary', ellipsis: true },
       { title: '输出摘要', dataIndex: 'outputSummary', ellipsis: true },
       { title: '错误信息', dataIndex: 'errorMessage', ellipsis: true },
@@ -108,6 +117,23 @@
     }
     return 'default';
   }
+
+  function errorTypeDescription(errorType: string) {
+    const descriptions: Record<string, string> = {
+      agent_disabled: 'Agent 未启用，不能运行。',
+      workspace_missing: 'Workspace 目录或路径缺失，需要重新物化。',
+      workspace_error: 'Workspace 状态、权限或安全检查失败。',
+      gateway_unavailable: 'Gateway 未分配、未同步、不可用或容量已满。',
+      gateway_timeout: 'OpenClaw Gateway 执行超时。',
+      quota_exceeded: '用户或 Agent 运行配额已达到上限。',
+      openclaw_error: 'OpenClaw 调用返回错误。',
+      cli_fallback_failed: 'Gateway 流式调用失败后 CLI 兼容兜底失败。',
+      client_disconnected: '浏览器 SSE 连接断开，运行已取消。',
+      precheck_failed: '运行前置检查失败。',
+      unknown_error: '未知错误，需要查看运行日志。',
+    };
+    return descriptions[errorType] || '未分类错误，需要查看运行日志。';
+  }
 </script>
 
 <style scoped>
@@ -121,5 +147,11 @@
 
   .run-error {
     color: #cf1322;
+  }
+
+  .error-hint {
+    display: block;
+    margin-top: 4px;
+    color: rgba(0, 0, 0, 0.55);
   }
 </style>
