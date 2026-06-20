@@ -121,6 +121,22 @@ def patch_file(name: str, replacements: list[tuple[str, str]]) -> None:
 
 def main() -> None:
     patch_file(
+        "client-1OJ6okpi.js",
+        [
+            (
+                '''\t\tws.on("close", (code, reason) => {
+\t\t\tconst reasonText = rawDataToString(reason);''',
+                '''\t\tws.on("close", (code, reason) => {
+\t\t\tconst reasonText = rawDataToString(reason);
+\t\t\ttry {
+\t\t\t\tif (process.env.OPENCLAW_DRAFT_AGENT_DEBUG === "1" || code !== 1000) console.error("[jeecg-gateway-ws-close] " + JSON.stringify({ code, reason: reasonText }));
+\t\t\t} catch {
+\t\t\t\tif (process.env.OPENCLAW_DRAFT_AGENT_DEBUG === "1" || code !== 1000) console.error("[jeecg-gateway-ws-close] code=" + code);
+\t\t\t}''',
+            )
+        ],
+    )
+    patch_file(
         "agent-scope-config-KLbWcRY1.js",
         [
             (
