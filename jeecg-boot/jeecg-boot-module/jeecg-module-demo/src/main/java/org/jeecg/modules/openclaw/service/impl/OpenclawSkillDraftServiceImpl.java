@@ -1575,7 +1575,7 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
     }
 
     private OpenclawAgent buildDraftTestAgent(OpenclawSkillDraft draft, OpenclawWorkspace workspace, OpenclawGatewayNode gateway, OpenclawSkillTestRun run) {
-        String agentKey = "skill_draft_test_" + draft.getId() + "_" + UUID.randomUUID().toString().replace("-", "");
+        String agentKey = "skill_draft_test_" + draft.getId() + "_" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
         OpenclawAgent agent = new OpenclawAgent();
         agent.setId(agentKey);
         agent.setUserId(draft.getOwnerUserId());
