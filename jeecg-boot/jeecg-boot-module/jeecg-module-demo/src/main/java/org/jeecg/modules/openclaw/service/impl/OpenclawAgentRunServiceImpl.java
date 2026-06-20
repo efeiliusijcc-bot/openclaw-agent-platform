@@ -137,6 +137,66 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
     }
 
     @Override
+    public OpenclawAgentRunResultVO runDraftTest(OpenclawAgent draftAgent, OpenclawWorkspace workspace, String prompt, String testRunId) {
+        if (draftAgent == null || !StringUtils.hasText(draftAgent.getAgentKey())) {
+            throw new JeecgBootException("Draft Agent key is required");
+        }
+        if (workspace == null || !StringUtils.hasText(workspace.getPath())) {
+            throw new JeecgBootException("Draft test workspace is required");
+        }
+        LoginUser user = permissionService.currentUser();
+        permissionService.checkOwnerOrAdmin(draftAgent.getUserId());
+        prompt = normalizePromptText(prompt);
+
+        Date startTime = new Date();
+        OpenclawAgentRun run = createQueuedRun(user, draftAgent, prompt, startTime);
+        save(run);
+        boolean gatewayRunningTracked = false;
+
+        try {
+            precheckDraftRunForExecution(draftAgent, workspace);
+            checkRunQuotaForExecution(user, draftAgent, run.getId());
+            markRunRunning(run, draftAgent);
+            gatewayRunningTracked = true;
+            CliResult result = executeCli(draftAgent.getAgentKey(), prompt);
+            Date finishTime = new Date();
+            run.setFinishTime(finishTime);
+            run.setDurationMs(finishTime.getTime() - startTime.getTime());
+            applyCliResult(run, result);
+            persistRunArtifacts(run, draftAgent, workspace, result, run.getOutputSummary(), null);
+            updateById(run);
+            auditRun("skill_draft_agent_run_test", run, draftAgent);
+            return toResult(run, draftAgent);
+        } catch (RunTimeoutException e) {
+            Date finishTime = new Date();
+            run.setFinishTime(finishTime);
+            run.setDurationMs(finishTime.getTime() - startTime.getTime());
+            run.setStatus(OpenclawConstants.RUN_STATUS_TIMEOUT);
+            run.setErrorType(OpenclawConstants.RUN_ERROR_GATEWAY_TIMEOUT);
+            run.setErrorMessage(trim(e.getMessage(), MAX_ERROR_LENGTH));
+            persistRunArtifacts(run, draftAgent, workspace, null, null, e);
+            updateById(run);
+            auditLogService.logFailure("skill_draft_agent_run_test", "agent_run", run.getId(), toResult(run, draftAgent));
+            return toResult(run, draftAgent);
+        } catch (Exception e) {
+            Date finishTime = new Date();
+            run.setFinishTime(finishTime);
+            run.setDurationMs(finishTime.getTime() - startTime.getTime());
+            run.setStatus(OpenclawConstants.RUN_STATUS_FAILED);
+            run.setErrorType(classifyError(e));
+            run.setErrorMessage(trim(e.getMessage(), MAX_ERROR_LENGTH));
+            persistRunArtifacts(run, draftAgent, workspace, null, null, e);
+            updateById(run);
+            auditLogService.logFailure("skill_draft_agent_run_test", "agent_run", run.getId(), toResult(run, draftAgent));
+            return toResult(run, draftAgent);
+        } finally {
+            if (gatewayRunningTracked) {
+                decrementGatewayRunning(draftAgent);
+            }
+        }
+    }
+
+    @Override
     public SseEmitter chatStream(String agentId, OpenclawAgentRunTestDTO dto) {
         LoginUser user = permissionService.currentUser();
         OpenclawAgent agent = requireAgent(agentId);
@@ -571,6 +631,10 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
 
     private String normalizePrompt(OpenclawAgentRunTestDTO dto) {
         String prompt = dto == null ? null : dto.getPrompt();
+        return normalizePromptText(prompt);
+    }
+
+    private String normalizePromptText(String prompt) {
         if (!StringUtils.hasText(prompt)) {
             throw new JeecgBootException("Prompt cannot be empty");
         }
@@ -579,6 +643,44 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
             throw new JeecgBootException("Prompt is too long, max length is " + MAX_PROMPT_LENGTH);
         }
         return prompt;
+    }
+
+    private void precheckDraftRunForExecution(OpenclawAgent agent, OpenclawWorkspace workspace) {
+        try {
+            precheckAgent(agent);
+            precheckDraftWorkspace(agent, workspace);
+            precheckGateway(agent);
+        } catch (RunPrecheckException e) {
+            throw e;
+        } catch (JeecgBootException e) {
+            throw new RunPrecheckException(OpenclawConstants.RUN_ERROR_PRECHECK_FAILED, e.getMessage(), e);
+        }
+    }
+
+    private void precheckDraftWorkspace(OpenclawAgent agent, OpenclawWorkspace workspace) {
+        if (!StringUtils.hasText(agent.getWorkspaceId()) || !agent.getWorkspaceId().equals(workspace.getId())) {
+            failPrecheck(OpenclawConstants.RUN_ERROR_WORKSPACE_ERROR, "Draft Agent workspace does not match the test workspace");
+        }
+        if (!java.util.Objects.equals(agent.getUserId(), workspace.getUserId())) {
+            failPrecheck(OpenclawConstants.RUN_ERROR_WORKSPACE_ERROR, "Draft Agent workspace owner does not match the agent owner");
+        }
+        if (!OpenclawConstants.WORKSPACE_STATUS_READY.equals(workspace.getStatus())) {
+            failPrecheck(OpenclawConstants.RUN_ERROR_WORKSPACE_ERROR, "Draft test workspace is not ready: " + workspace.getStatus());
+        }
+        if (!StringUtils.hasText(workspace.getPath())) {
+            failPrecheck(OpenclawConstants.RUN_ERROR_WORKSPACE_MISSING, "Draft test workspace path is empty");
+        }
+        Path workspacePath = normalizePrecheckPath(workspace.getPath(), "Draft test workspace path is invalid", OpenclawConstants.RUN_ERROR_WORKSPACE_ERROR);
+        Path rootPath = normalizePrecheckPath(OpenclawConstants.WORKSPACE_ROOT, "OpenClaw workspace root is invalid", OpenclawConstants.RUN_ERROR_WORKSPACE_ERROR);
+        if (!workspacePath.startsWith(rootPath)) {
+            failPrecheck(OpenclawConstants.RUN_ERROR_WORKSPACE_ERROR, "Draft test workspace path is outside the configured workspace root");
+        }
+        if (Files.isSymbolicLink(workspacePath)) {
+            failPrecheck(OpenclawConstants.RUN_ERROR_WORKSPACE_ERROR, "Draft test workspace path must not be a symbolic link");
+        }
+        if (!Files.exists(workspacePath) || !Files.isDirectory(workspacePath)) {
+            failPrecheck(OpenclawConstants.RUN_ERROR_WORKSPACE_MISSING, "Draft test workspace directory is missing");
+        }
     }
 
     private void checkRunQuota(LoginUser user, OpenclawAgent agent, String currentRunId) {
@@ -853,6 +955,24 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
         try {
             OpenclawWorkspace workspace = workspaceMapper.selectById(agent.getWorkspaceId());
             if (workspace == null || !StringUtils.hasText(workspace.getPath())) {
+                return;
+            }
+            persistRunArtifacts(run, agent, workspace, cliResult, output, error);
+        } catch (Exception artifactError) {
+            String message = firstText(run.getErrorMessage(), "") + "\nArtifact write failed: " + artifactError.getMessage();
+            run.setErrorMessage(trim(message.trim(), MAX_ERROR_LENGTH));
+            if (!StringUtils.hasText(run.getErrorType())) {
+                run.setErrorType(OpenclawConstants.RUN_ERROR_UNKNOWN);
+            }
+        }
+    }
+
+    private void persistRunArtifacts(OpenclawAgentRun run, OpenclawAgent agent, OpenclawWorkspace workspace, CliResult cliResult, String output, Exception error) {
+        if (run == null || agent == null || workspace == null || !StringUtils.hasText(run.getId())) {
+            return;
+        }
+        try {
+            if (!StringUtils.hasText(workspace.getPath())) {
                 return;
             }
             Path workspacePath = normalizePath(workspace.getPath(), "Agent workspace path is invalid");

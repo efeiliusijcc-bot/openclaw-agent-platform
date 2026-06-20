@@ -20,7 +20,6 @@ import org.jeecg.modules.openclaw.dto.OpenclawSkillGenerateDTO;
 import org.jeecg.modules.openclaw.dto.OpenclawSkillRepairApplyDTO;
 import org.jeecg.modules.openclaw.dto.OpenclawSkillRepairDTO;
 import org.jeecg.modules.openclaw.entity.OpenclawAgent;
-import org.jeecg.modules.openclaw.entity.OpenclawAgentSkill;
 import org.jeecg.modules.openclaw.entity.OpenclawGatewayNode;
 import org.jeecg.modules.openclaw.entity.OpenclawSkill;
 import org.jeecg.modules.openclaw.entity.OpenclawSkillAiEditRecord;
@@ -28,8 +27,6 @@ import org.jeecg.modules.openclaw.entity.OpenclawSkillDraft;
 import org.jeecg.modules.openclaw.entity.OpenclawSkillDraftFile;
 import org.jeecg.modules.openclaw.entity.OpenclawSkillTestRun;
 import org.jeecg.modules.openclaw.entity.OpenclawWorkspace;
-import org.jeecg.modules.openclaw.mapper.OpenclawAgentMapper;
-import org.jeecg.modules.openclaw.mapper.OpenclawAgentSkillMapper;
 import org.jeecg.modules.openclaw.mapper.OpenclawGatewayNodeMapper;
 import org.jeecg.modules.openclaw.mapper.OpenclawSkillAiEditRecordMapper;
 import org.jeecg.modules.openclaw.mapper.OpenclawSkillDraftFileMapper;
@@ -37,7 +34,6 @@ import org.jeecg.modules.openclaw.mapper.OpenclawSkillDraftMapper;
 import org.jeecg.modules.openclaw.mapper.OpenclawWorkspaceMapper;
 import org.jeecg.modules.openclaw.service.IOpenclawAgentRunService;
 import org.jeecg.modules.openclaw.service.IOpenclawAuditLogService;
-import org.jeecg.modules.openclaw.service.IOpenclawGatewayConfigService;
 import org.jeecg.modules.openclaw.service.IOpenclawPermissionService;
 import org.jeecg.modules.openclaw.service.IOpenclawSkillDraftService;
 import org.jeecg.modules.openclaw.service.IOpenclawSkillService;
@@ -79,6 +75,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
 @Service
 public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraftMapper, OpenclawSkillDraft> implements IOpenclawSkillDraftService {
@@ -89,6 +86,7 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
     private static final Set<String> DANGEROUS_CODE_KEYWORDS = Set.of(
         "os.system", "subprocess", "rm -rf", "curl ", "wget ", "chmod", "sudo", "eval(", "exec(", "socket", "requests", "open('/etc"
     );
+    private static final Object DRAFT_AGENT_REGISTRY_LOCK = new Object();
 
     @Autowired
     private IOpenclawPermissionService permissionService;
@@ -105,13 +103,7 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
     @Autowired
     private IOpenclawAgentRunService agentRunService;
     @Autowired
-    private IOpenclawGatewayConfigService gatewayConfigService;
-    @Autowired
-    private OpenclawAgentMapper agentMapper;
-    @Autowired
     private OpenclawWorkspaceMapper workspaceMapper;
-    @Autowired
-    private OpenclawAgentSkillMapper agentSkillMapper;
     @Autowired
     private OpenclawGatewayNodeMapper gatewayNodeMapper;
     @Autowired
@@ -129,6 +121,12 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
 
     @Value("${openclaw.skill.ai.model:${OPENCLAW_SKILL_AI_MODEL:}}")
     private String skillAiModel;
+
+    @Value("${openclaw.gateway.draft-agent-registry-path:${OPENCLAW_GATEWAY_DRAFT_AGENT_REGISTRY_PATH:/root/.openclaw/draft-agents.json}}")
+    private String draftAgentRegistryPath;
+
+    @Value("${openclaw.gateway.draft-agent-ttl-seconds:${OPENCLAW_GATEWAY_DRAFT_AGENT_TTL_SECONDS:600}}")
+    private Long draftAgentTtlSeconds;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -426,9 +424,15 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
             }
 
             TestAgentContext context = prepareTestAgent(draft, run);
-            OpenclawAgentRunTestDTO runDto = new OpenclawAgentRunTestDTO();
-            runDto.setPrompt(dto.getPrompt());
-            OpenclawAgentRunResultVO agentRun = agentRunService.runTest(context.agent.getId(), runDto);
+            registerDraftAgent(context, draft, run, user);
+            auditLogService.logSuccess("skill_draft_agent_register", "skill_test_run", run.getId(), draftAgentAuditDetail(context, draft, run, user));
+            OpenclawAgentRunResultVO agentRun;
+            try {
+                agentRun = agentRunService.runDraftTest(context.agent, context.workspace, dto.getPrompt(), run.getId());
+            } finally {
+                cleanupDraftAgent(context.agent.getAgentKey());
+                auditLogService.logSuccess("skill_draft_agent_cleanup", "skill_test_run", run.getId(), draftAgentAuditDetail(context, draft, run, user));
+            }
             String status = StringUtils.hasText(agentRun.getStatus()) ? agentRun.getStatus() : OpenclawConstants.RUN_STATUS_FAILED;
             finishTestRun(run, start, status, agentRun.getOutputSummary(), agentRun.getErrorMessage(), context.workspace.getPath());
             run.setAgentRunId(agentRun.getRunId());
@@ -1533,14 +1537,14 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
 
     private TestAgentContext prepareTestAgent(OpenclawSkillDraft draft, OpenclawSkillTestRun run) throws IOException {
         OpenclawWorkspace workspace = ensureTestWorkspace(draft);
-        OpenclawAgent agent = ensureTestAgent(draft, workspace);
-        OpenclawSkill snapshot = createTestSkillSnapshot(draft, run);
-        replaceTestAgentBinding(agent, snapshot);
+        OpenclawGatewayNode gateway = requireOnlineGatewayForDraftTest();
+        OpenclawAgent agent = buildDraftTestAgent(draft, workspace, gateway, run);
         workspaceMaterializer.materialize(agent, workspace);
-        syncGatewayForTestAgent();
+        materializeDraftSkill(draft, workspace, run);
         TestAgentContext context = new TestAgentContext();
         context.workspace = workspace;
         context.agent = agent;
+        context.gateway = gateway;
         return context;
     }
 
@@ -1570,85 +1574,59 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
         return workspace;
     }
 
-    private OpenclawAgent ensureTestAgent(OpenclawSkillDraft draft, OpenclawWorkspace workspace) {
-        String agentKey = "skill_draft_test_" + draft.getId();
-        OpenclawAgent agent = agentMapper.selectOne(new LambdaQueryWrapper<OpenclawAgent>()
-            .eq(OpenclawAgent::getAgentKey, agentKey)
-            .last("limit 1"));
-        if (agent == null) {
-            agent = new OpenclawAgent();
-            agent.setUserId(draft.getOwnerUserId());
-            agent.setUsername(draft.getOwnerUsername());
-            agent.setAgentKey(agentKey);
-            agent.setMaxSkills(1);
-            agent.setMaxDailyRuns(1000);
-            agent.setDelFlag(OpenclawConstants.DEL_FLAG_NORMAL);
-        }
+    private OpenclawAgent buildDraftTestAgent(OpenclawSkillDraft draft, OpenclawWorkspace workspace, OpenclawGatewayNode gateway, OpenclawSkillTestRun run) {
+        String agentKey = "skill_draft_test_" + draft.getId() + "_" + UUID.randomUUID().toString().replace("-", "");
+        OpenclawAgent agent = new OpenclawAgent();
+        agent.setId(agentKey);
+        agent.setUserId(draft.getOwnerUserId());
+        agent.setUsername(draft.getOwnerUsername());
+        agent.setAgentKey(agentKey);
+        agent.setMaxSkills(1);
+        agent.setMaxDailyRuns(1000);
+        agent.setDelFlag(OpenclawConstants.DEL_FLAG_NORMAL);
         agent.setWorkspaceId(workspace.getId());
         agent.setName("Skill Draft Test Agent " + draft.getSkillSlug());
-        agent.setDescription("Temporary test Agent for Skill Draft " + draft.getId());
+        agent.setDescription("Temporary test Agent for Skill Draft " + draft.getId() + ", testRunId=" + run.getId());
         agent.setStatus(OpenclawConstants.AGENT_STATUS_ENABLED);
+        agent.setGatewayId(gateway.getId());
         agent.setConfigJson(null);
-        agent.setRemark("Managed by Skill Draft test run " + draft.getId());
-        agentMapper.insertOrUpdate(agent);
+        agent.setRemark("Temporary Skill Draft test Agent; not persisted to formal Agent table.");
         return agent;
     }
 
-    private OpenclawSkill createTestSkillSnapshot(OpenclawSkillDraft draft, OpenclawSkillTestRun run) throws IOException {
-        String version = "draft-test-" + run.getId();
-        Path target = Paths.get(OpenclawConstants.SKILL_ROOT, "draft-tests", draft.getOwnerUserId(), draft.getId(), run.getId())
-            .toAbsolutePath().normalize();
-        Path root = Paths.get(OpenclawConstants.SKILL_ROOT).toAbsolutePath().normalize();
-        if (!target.startsWith(root)) {
-            throw new JeecgBootException("Invalid test Skill snapshot path.");
+    private void materializeDraftSkill(OpenclawSkillDraft draft, OpenclawWorkspace workspace, OpenclawSkillTestRun run) throws IOException {
+        Path skillsRoot = workspaceMaterializer.safeWorkspacePath(workspace.getPath()).resolve("skills").normalize();
+        Path target = skillsRoot.resolve(draft.getSkillSlug()).normalize();
+        if (!target.startsWith(skillsRoot)) {
+            throw new JeecgBootException("Invalid draft Skill slug path.");
         }
-        if (Files.exists(target)) {
-            throw new JeecgBootException("Test Skill snapshot already exists.");
-        }
+        Path temp = skillsRoot.resolve("." + draft.getSkillSlug() + ".tmp-" + run.getId()).normalize();
+        Path backup = skillsRoot.resolve("." + draft.getSkillSlug() + ".bak-" + System.currentTimeMillis()).normalize();
         try {
-            Files.createDirectories(target.getParent());
-            copyDirectory(draftRoot(draft), target);
-            writeSkillManifest(target, draft.getDraftName(), draft.getSkillSlug(), version, draft.getDescription(), draft.getOwnerUsername());
+            Files.createDirectories(skillsRoot);
+            cleanupQuietly(temp);
+            copyDirectory(draftRoot(draft), temp);
+            writeSkillManifest(temp, draft.getDraftName(), draft.getSkillSlug(), "draft-test-" + run.getId(), draft.getDescription(), draft.getOwnerUsername());
+            if (Files.exists(target)) {
+                Files.move(target, backup, StandardCopyOption.REPLACE_EXISTING);
+            }
+            try {
+                Files.move(temp, target, StandardCopyOption.ATOMIC_MOVE);
+            } catch (IOException atomicMoveError) {
+                Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING);
+            }
+            cleanupQuietly(backup);
         } catch (IOException e) {
-            cleanupQuietly(target);
+            if (Files.exists(backup)) {
+                cleanupQuietly(target);
+                Files.move(backup, target, StandardCopyOption.REPLACE_EXISTING);
+            }
+            cleanupQuietly(temp);
             throw e;
         }
-        OpenclawSkill skill = new OpenclawSkill();
-        skill.setOwnerUserId(draft.getOwnerUserId());
-        skill.setOwnerUsername(draft.getOwnerUsername());
-        skill.setName(draft.getDraftName() + " Test Snapshot");
-        skill.setSlug(draft.getSkillSlug());
-        skill.setVersion(version);
-        skill.setScope("private");
-        skill.setStatus(OpenclawConstants.SKILL_STATUS_PRIVATE);
-        skill.setDescription(draft.getDescription());
-        skill.setPath(target.toString());
-        skill.setChecksum(sha256Directory(target));
-        skill.setFileSize(directorySize(target));
-        skill.setRemark("Skill Draft test snapshot " + run.getId());
-        skill.setDelFlag(OpenclawConstants.DEL_FLAG_NORMAL);
-        skillService.save(skill);
-        return skill;
     }
 
-    private void replaceTestAgentBinding(OpenclawAgent agent, OpenclawSkill snapshot) {
-        List<OpenclawAgentSkill> bindings = agentSkillMapper.selectList(new LambdaQueryWrapper<OpenclawAgentSkill>()
-            .eq(OpenclawAgentSkill::getAgentId, agent.getId())
-            .eq(OpenclawAgentSkill::getDelFlag, OpenclawConstants.DEL_FLAG_NORMAL));
-        for (OpenclawAgentSkill binding : bindings) {
-            binding.setEnabled(0);
-            binding.setDelFlag(OpenclawConstants.DEL_FLAG_DELETED);
-            agentSkillMapper.updateById(binding);
-        }
-        OpenclawAgentSkill binding = new OpenclawAgentSkill();
-        binding.setAgentId(agent.getId());
-        binding.setSkillId(snapshot.getId());
-        binding.setEnabled(1);
-        binding.setDelFlag(OpenclawConstants.DEL_FLAG_NORMAL);
-        agentSkillMapper.insert(binding);
-    }
-
-    private void syncGatewayForTestAgent() {
+    private OpenclawGatewayNode requireOnlineGatewayForDraftTest() {
         OpenclawGatewayNode gateway = gatewayNodeMapper.selectOne(new LambdaQueryWrapper<OpenclawGatewayNode>()
             .eq(OpenclawGatewayNode::getStatus, OpenclawConstants.GATEWAY_STATUS_ONLINE)
             .eq(OpenclawGatewayNode::getDelFlag, OpenclawConstants.DEL_FLAG_NORMAL)
@@ -1656,7 +1634,135 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
         if (gateway == null) {
             throw new JeecgBootException("No online OpenClaw Gateway node is available for Skill Draft test.");
         }
-        gatewayConfigService.sync(gateway.getId());
+        return gateway;
+    }
+
+    private void registerDraftAgent(TestAgentContext context, OpenclawSkillDraft draft, OpenclawSkillTestRun run, LoginUser user) throws IOException {
+        JSONObject entry = new JSONObject(true);
+        long now = System.currentTimeMillis();
+        long ttlMillis = Math.max(60L, Math.min(draftAgentTtlSeconds == null ? 600L : draftAgentTtlSeconds, 3600L)) * 1000L;
+        entry.put("id", context.agent.getAgentKey());
+        entry.put("draftId", draft.getId());
+        entry.put("workspaceId", context.workspace.getId());
+        entry.put("workspace", context.workspace.getPath());
+        entry.put("userId", user.getId());
+        entry.put("username", user.getUsername());
+        entry.put("skillSlug", draft.getSkillSlug());
+        entry.put("skills", List.of(draft.getSkillSlug()));
+        entry.put("testRunId", run.getId());
+        entry.put("createdAt", now);
+        entry.put("expiresAt", now + ttlMillis);
+        JSONObject identity = new JSONObject(true);
+        identity.put("name", context.agent.getName());
+        entry.put("identity", identity);
+
+        synchronized (DRAFT_AGENT_REGISTRY_LOCK) {
+            JSONObject registry = readDraftAgentRegistry();
+            JSONArray agents = compactDraftAgentRegistry(registry.getJSONArray("agents"), now);
+            for (int i = agents.size() - 1; i >= 0; i--) {
+                JSONObject item = agents.getJSONObject(i);
+                if (context.agent.getAgentKey().equals(item.getString("id"))) {
+                    agents.remove(i);
+                }
+            }
+            agents.add(entry);
+            registry.put("version", 1);
+            registry.put("agents", agents);
+            writeDraftAgentRegistry(registry);
+        }
+    }
+
+    private void cleanupDraftAgent(String agentKey) throws IOException {
+        if (!StringUtils.hasText(agentKey)) {
+            return;
+        }
+        synchronized (DRAFT_AGENT_REGISTRY_LOCK) {
+            long now = System.currentTimeMillis();
+            JSONObject registry = readDraftAgentRegistry();
+            JSONArray source = compactDraftAgentRegistry(registry.getJSONArray("agents"), now);
+            JSONArray agents = new JSONArray();
+            for (int i = 0; i < source.size(); i++) {
+                JSONObject item = source.getJSONObject(i);
+                if (!agentKey.equals(item.getString("id"))) {
+                    agents.add(item);
+                }
+            }
+            registry.put("version", 1);
+            registry.put("agents", agents);
+            writeDraftAgentRegistry(registry);
+        }
+    }
+
+    private JSONObject readDraftAgentRegistry() throws IOException {
+        Path path = draftAgentRegistryFile();
+        if (!Files.isRegularFile(path)) {
+            JSONObject empty = new JSONObject(true);
+            empty.put("version", 1);
+            empty.put("agents", new JSONArray());
+            return empty;
+        }
+        String content = Files.readString(path, StandardCharsets.UTF_8);
+        JSONObject registry = JSON.parseObject(content);
+        if (registry == null) {
+            registry = new JSONObject(true);
+        }
+        if (registry.getJSONArray("agents") == null) {
+            registry.put("agents", new JSONArray());
+        }
+        return registry;
+    }
+
+    private JSONArray compactDraftAgentRegistry(JSONArray source, long now) {
+        JSONArray agents = new JSONArray();
+        if (source == null) {
+            return agents;
+        }
+        for (int i = 0; i < source.size(); i++) {
+            JSONObject item = source.getJSONObject(i);
+            if (item == null || !StringUtils.hasText(item.getString("id"))) {
+                continue;
+            }
+            Long expiresAt = item.getLong("expiresAt");
+            if (expiresAt != null && expiresAt <= now) {
+                continue;
+            }
+            agents.add(item);
+        }
+        return agents;
+    }
+
+    private void writeDraftAgentRegistry(JSONObject registry) throws IOException {
+        Path path = draftAgentRegistryFile();
+        Path parent = path.getParent();
+        if (parent == null) {
+            throw new JeecgBootException("Draft Agent registry path must include parent directory.");
+        }
+        Files.createDirectories(parent);
+        workspaceMaterializer.ensureNoSymbolicLink(parent);
+        Path temp = parent.resolve(path.getFileName().toString() + ".tmp-" + IdWorker.getIdStr()).normalize();
+        Files.writeString(temp, JSON.toJSONString(registry), StandardCharsets.UTF_8, StandardOpenOption.CREATE_NEW);
+        try {
+            Files.move(temp, path, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+        } catch (IOException atomicMoveError) {
+            Files.move(temp, path, StandardCopyOption.REPLACE_EXISTING);
+        }
+    }
+
+    private Path draftAgentRegistryFile() {
+        if (!StringUtils.hasText(draftAgentRegistryPath)) {
+            throw new JeecgBootException("Draft Agent registry path is empty.");
+        }
+        return Paths.get(draftAgentRegistryPath).toAbsolutePath().normalize();
+    }
+
+    private Map<String, Object> draftAgentAuditDetail(TestAgentContext context, OpenclawSkillDraft draft, OpenclawSkillTestRun run, LoginUser user) {
+        Map<String, Object> detail = new LinkedHashMap<>();
+        detail.put("testRunId", run.getId());
+        detail.put("draftId", draft.getId());
+        detail.put("agentId", context.agent.getAgentKey());
+        detail.put("workspaceId", context.workspace.getId());
+        detail.put("userId", user.getId());
+        return detail;
     }
 
     private void writeSkillManifest(Path root, String name, String slug, String version, String description, String owner) throws IOException {
@@ -1812,6 +1918,7 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
     private static class TestAgentContext {
         private OpenclawWorkspace workspace;
         private OpenclawAgent agent;
+        private OpenclawGatewayNode gateway;
     }
 
     private static class GeneratedSkillSpec {

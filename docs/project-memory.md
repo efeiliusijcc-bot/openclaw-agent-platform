@@ -1,5 +1,30 @@
 # Project Memory
 
+## 2026-06-21 - Skill Draft Test Temporary Agent Registry
+
+### Context
+
+- AI Edit Preview / Apply / Lint had already passed on the server. The remaining blocker was Skill Draft Test failing with `unknown agent id "skill_draft_test_..."`.
+- Root cause: the old draft test path created persisted test `openclaw_agent`, `openclaw_skill`, and `openclaw_agent_skill` rows, then executed through the formal Agent Run path. Gateway runtime did not know that test agent, and the approach blurred the draft-vs-published boundary.
+
+### Decision
+
+- Draft Test now creates a temporary agent key shaped as `skill_draft_test_{draftId}_{uuid}`.
+- The backend materializes current draft files into the isolated test workspace under `skills/<skillSlug>`, writes a short-lived entry to `/root/.openclaw/draft-agents.json`, runs through Gateway, then actively removes the registry entry.
+- Draft Test no longer creates formal Agent, Skill, or Agent-Skill binding rows.
+- Registry payload is non-secret operational metadata only: agent id, draft id, workspace id/path, user id/name, skill slug, test run id, and `expiresAt`.
+
+### Gateway Patch Note
+
+- Server OpenClaw is installed as bundled npm dist. The tracked patch script is `scripts/patch-openclaw-draft-agent-registry.py`.
+- The patch updates `agent-scope-config-KLbWcRY1.js`, `agent-via-gateway-kIPK668y.js`, and `agent-YgzFw64q.js` so Draft Agents from the registry participate in normal `listAgentIds`, `resolveAgentConfig`, and `resolveAgentWorkspaceDir` lookups.
+- Important mistake recorded: patching only `agent-via-gateway` and the Gateway `agent` handler changed the error from `invalid agent params: unknown agent id` to a later session-layer `Unknown agent id`. The correct fix is to patch the shared `agent-scope-config` lookup as well.
+
+### Verification
+
+- Local backend compile passed: `mvn -pl jeecg-boot-module/jeecg-module-demo -am -DskipTests compile`.
+- Server smoke: a temporary `draftsmoke` entry in `/root/.openclaw/draft-agents.json` appears in `openclaw agents list --json`; `openclaw agent --agent draftsmoke ...` no longer fails with unknown agent id. The remaining smoke failure was provider schema/tool payload rejection, which is a model execution failure and should be recorded as a Test failure with AI Repair context.
+
 ## 2026-06-21 - AI Edit 工程化闭环部署复盘
 
 ### 背景
