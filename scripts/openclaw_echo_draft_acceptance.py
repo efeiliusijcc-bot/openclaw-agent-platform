@@ -145,7 +145,7 @@ No file, network, credential, database, or shell access is required.
 
     expected = "ECHO_OK_" + str(int(time.time()))
     prompt = "Use the Codex Echo Skill. ECHO_TEXT: " + expected + "\nReturn exactly the echo text and no other words."
-    status, test = request("POST", f"/openclaw/skill/draft/{draft_id}/test", {"prompt": prompt, "expectedOutput": expected}, token, timeout=300)
+    status, test = request("POST", f"/openclaw/skill/draft/{draft_id}/test", {"prompt": prompt, "expectedOutput": expected, "localExecution": True}, token, timeout=300)
     test_obj = (test or {}).get("result") or {}
     output = test_obj.get("outputSummary") or ""
     error = test_obj.get("errorMessage") or ""

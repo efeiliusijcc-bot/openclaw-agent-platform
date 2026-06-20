@@ -11,7 +11,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 public interface IOpenclawAgentRunService extends IService<OpenclawAgentRun> {
     OpenclawAgentRunResultVO runTest(String agentId, OpenclawAgentRunTestDTO dto);
 
-    OpenclawAgentRunResultVO runDraftTest(OpenclawAgent draftAgent, OpenclawWorkspace workspace, String prompt, String testRunId);
+    OpenclawAgentRunResultVO runDraftTest(OpenclawAgent draftAgent, OpenclawWorkspace workspace, String prompt, String testRunId, boolean localExecution);
 
     SseEmitter chatStream(String agentId, OpenclawAgentRunTestDTO dto);
 }

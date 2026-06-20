@@ -32,6 +32,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -82,6 +83,12 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
 
     @Value("${openclaw.skill-draft.test-model:${OPENCLAW_DRAFT_TEST_MODEL:${OPENCLAW_RUN_MODEL_OVERRIDE:}}}")
     private String draftTestModelOverride;
+
+    @Value("${openclaw.skill-draft.local-test-enabled:${OPENCLAW_DRAFT_LOCAL_TEST_ENABLED:false}}")
+    private Boolean draftLocalTestEnabled;
+
+    @Value("${openclaw.skill-draft.local-test-python:${OPENCLAW_DRAFT_LOCAL_TEST_PYTHON:python3}}")
+    private String draftLocalTestPython;
 
     @Value("${openclaw.gateway.base-url:${OPENCLAW_GATEWAY_BASE_URL:${OPENCLAW_GATEWAY_URL:http://172.17.0.1:18089}}}")
     private String defaultGatewayBaseUrl;
@@ -145,7 +152,7 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
     }
 
     @Override
-    public OpenclawAgentRunResultVO runDraftTest(OpenclawAgent draftAgent, OpenclawWorkspace workspace, String prompt, String testRunId) {
+    public OpenclawAgentRunResultVO runDraftTest(OpenclawAgent draftAgent, OpenclawWorkspace workspace, String prompt, String testRunId, boolean localExecution) {
         if (draftAgent == null || !StringUtils.hasText(draftAgent.getAgentKey())) {
             throw new JeecgBootException("Draft Agent key is required");
         }
@@ -167,11 +174,20 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
             markRunRunning(run, draftAgent);
             gatewayRunningTracked = true;
             String sessionKey = "agent:" + draftAgent.getAgentKey() + ":draft-test-" + testRunId;
-            CliResult result = executeCli(draftAgent.getAgentKey(), prompt, sessionKey, testRunId, draftTestModelOverride);
+            CliResult result;
+            if (localExecution && Boolean.TRUE.equals(draftLocalTestEnabled)) {
+                result = executeLocalDraftSkill(draftAgent, workspace, prompt, testRunId);
+            } else {
+                result = executeCli(draftAgent.getAgentKey(), prompt, sessionKey, testRunId, draftTestModelOverride);
+            }
             Date finishTime = new Date();
             run.setFinishTime(finishTime);
             run.setDurationMs(finishTime.getTime() - startTime.getTime());
-            applyCliResult(run, result);
+            if ("local-skill".equals(result.runner)) {
+                applyLocalSkillResult(run, result);
+            } else {
+                applyCliResult(run, result);
+            }
             persistRunArtifacts(run, draftAgent, workspace, result, run.getOutputSummary(), null);
             updateById(run);
             auditRun("skill_draft_agent_run_test", run, draftAgent);
@@ -814,12 +830,101 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
             throw new RunTimeoutException("OpenClaw CLI timed out after " + timeoutSeconds() + " seconds");
         }
         CliResult result = new CliResult();
+        result.runner = "openclaw-cli";
         result.exitCode = process.exitValue();
         result.stdout = stdout.get(5, TimeUnit.SECONDS);
         result.stderr = stderr.get(5, TimeUnit.SECONDS);
         log.info("openclaw cli run finish agentKey={} testRunId={} exitCode={} stdoutSummary={} stderrSummary={}",
             agentKey, testRunId, result.exitCode, trim(result.stdout, 500), trim(result.stderr, 500));
         return result;
+    }
+
+    private CliResult executeLocalDraftSkill(OpenclawAgent agent, OpenclawWorkspace workspace, String prompt, String testRunId) throws Exception {
+        Path skillPath = resolveSingleDraftSkillPath(workspace);
+        Path mainPy = skillPath.resolve("main.py").normalize();
+        if (!Files.isRegularFile(mainPy) || Files.isSymbolicLink(mainPy)) {
+            throw new JeecgBootException("Local draft Skill test requires skills/<slug>/main.py.");
+        }
+        String python = StringUtils.hasText(draftLocalTestPython) ? draftLocalTestPython.trim() : "python3";
+        String runner = """
+            import importlib.util
+            import json
+            import pathlib
+            import sys
+
+            skill_dir = pathlib.Path(sys.argv[1]).resolve()
+            module_path = skill_dir / "main.py"
+            prompt = sys.stdin.read()
+            spec = importlib.util.spec_from_file_location("openclaw_draft_skill_main", module_path)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            fn = getattr(module, "run", None) or getattr(module, "main", None)
+            if not callable(fn):
+                raise SystemExit("main.py must define run(input_text) or main(input_text)")
+            result = fn(prompt)
+            if result is None:
+                result = ""
+            if isinstance(result, str):
+                print(result)
+            else:
+                print(json.dumps(result, ensure_ascii=False))
+            """;
+        List<String> command = new ArrayList<>();
+        command.add(python);
+        command.add("-c");
+        command.add(runner);
+        command.add(skillPath.toString());
+
+        ProcessBuilder builder = new ProcessBuilder(command);
+        builder.directory(skillPath.toFile());
+        log.info("openclaw local draft skill run start agentKey={} testRunId={} skillPath={} command={}",
+            agent.getAgentKey(), testRunId, skillPath, safeCommand(command));
+        Process process = builder.start();
+        try (OutputStream stdin = process.getOutputStream()) {
+            stdin.write(prompt.getBytes(StandardCharsets.UTF_8));
+        }
+        CompletableFuture<String> stdout = CompletableFuture.supplyAsync(() -> readStream(process.getInputStream()));
+        CompletableFuture<String> stderr = CompletableFuture.supplyAsync(() -> readStream(process.getErrorStream()));
+        boolean finished = process.waitFor(timeoutSeconds() + 5, TimeUnit.SECONDS);
+        if (!finished) {
+            process.destroyForcibly();
+            throw new RunTimeoutException("OpenClaw local draft Skill test timed out after " + timeoutSeconds() + " seconds");
+        }
+        CliResult result = new CliResult();
+        result.runner = "local-skill";
+        result.exitCode = process.exitValue();
+        result.stdout = stdout.get(5, TimeUnit.SECONDS);
+        result.stderr = stderr.get(5, TimeUnit.SECONDS);
+        log.info("openclaw local draft skill run finish agentKey={} testRunId={} exitCode={} stdoutSummary={} stderrSummary={}",
+            agent.getAgentKey(), testRunId, result.exitCode, trim(result.stdout, 500), trim(result.stderr, 500));
+        return result;
+    }
+
+    private Path resolveSingleDraftSkillPath(OpenclawWorkspace workspace) throws IOException {
+        Path workspacePath = normalizePath(workspace.getPath(), "Draft test workspace path is invalid");
+        Path rootPath = normalizePath(OpenclawConstants.WORKSPACE_ROOT, "OpenClaw workspace root is invalid");
+        if (!workspacePath.startsWith(rootPath) || Files.isSymbolicLink(workspacePath)) {
+            throw new JeecgBootException("Draft test workspace path is outside the allowed root.");
+        }
+        Path skillsRoot = workspacePath.resolve("skills").normalize();
+        if (!skillsRoot.startsWith(workspacePath) || !Files.isDirectory(skillsRoot) || Files.isSymbolicLink(skillsRoot)) {
+            throw new JeecgBootException("Draft test skills directory is missing.");
+        }
+        try (var stream = Files.list(skillsRoot)) {
+            List<Path> candidates = stream
+                .filter(Files::isDirectory)
+                .filter(path -> !Files.isSymbolicLink(path))
+                .filter(path -> Files.isRegularFile(path.resolve("main.py")))
+                .toList();
+            if (candidates.size() != 1) {
+                throw new JeecgBootException("Local draft Skill test requires exactly one skills/<slug>/main.py, found " + candidates.size() + ".");
+            }
+            Path skillPath = candidates.get(0).toAbsolutePath().normalize();
+            if (!skillPath.startsWith(skillsRoot)) {
+                throw new JeecgBootException("Draft Skill path is outside the skills directory.");
+            }
+            return skillPath;
+        }
     }
 
     private List<String> safeCommand(List<String> command) {
@@ -832,11 +937,22 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
                 continue;
             }
             safe.add(item);
-            if ("--message".equals(item)) {
+            if ("--message".equals(item) || "-c".equals(item)) {
                 redactNext = true;
             }
         }
         return safe;
+    }
+
+    private void applyLocalSkillResult(OpenclawAgentRun run, CliResult result) {
+        boolean success = result.exitCode == 0;
+        run.setStatus(success ? OpenclawConstants.RUN_STATUS_SUCCESS : OpenclawConstants.RUN_STATUS_FAILED);
+        run.setErrorType(success ? null : OpenclawConstants.RUN_ERROR_CLI_FALLBACK_FAILED);
+        run.setOutputSummary(trim(result.stdout, MAX_SUMMARY_LENGTH));
+        if (!success) {
+            String error = firstText(result.stderr, "OpenClaw local draft Skill test exited with code " + result.exitCode);
+            run.setErrorMessage(trim(error, MAX_ERROR_LENGTH));
+        }
     }
 
     private long timeoutSeconds() {
@@ -1063,6 +1179,7 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
         builder.append("durationMs=").append(run.getDurationMs()).append("\n\n");
         builder.append("input:\n").append(firstText(run.getInputSummary(), "")).append("\n\n");
         if (cliResult != null) {
+            builder.append("runner=").append(firstText(cliResult.runner, "openclaw-cli")).append("\n");
             builder.append("exitCode=").append(cliResult.exitCode).append("\n\n");
             builder.append("stdout:\n").append(firstText(cliResult.stdout, "")).append("\n\n");
             builder.append("stderr:\n").append(firstText(cliResult.stderr, "")).append("\n\n");
@@ -1112,6 +1229,7 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
     }
 
     private static class CliResult {
+        private String runner;
         private int exitCode;
         private String stdout;
         private String stderr;

@@ -433,7 +433,7 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
             auditLogService.logSuccess("skill_draft_agent_register", "skill_test_run", run.getId(), draftAgentAuditDetail(context, draft, run, user));
             OpenclawAgentRunResultVO agentRun;
             try {
-                agentRun = agentRunService.runDraftTest(context.agent, context.workspace, dto.getPrompt(), run.getId());
+                agentRun = agentRunService.runDraftTest(context.agent, context.workspace, dto.getPrompt(), run.getId(), Boolean.TRUE.equals(dto.getLocalExecution()));
             } finally {
                 log.info("skill draft agent retained until ttl agentKey={} draftId={} testRunId={} workspaceId={} registryPath={}",
                     context.agent.getAgentKey(), draft.getId(), run.getId(), context.workspace.getId(), draftAgentRegistryFile());

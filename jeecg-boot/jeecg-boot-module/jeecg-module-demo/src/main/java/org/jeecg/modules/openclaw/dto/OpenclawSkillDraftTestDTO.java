@@ -6,4 +6,5 @@ import lombok.Data;
 public class OpenclawSkillDraftTestDTO {
     private String prompt;
     private String expectedOutput;
+    private Boolean localExecution;
 }
