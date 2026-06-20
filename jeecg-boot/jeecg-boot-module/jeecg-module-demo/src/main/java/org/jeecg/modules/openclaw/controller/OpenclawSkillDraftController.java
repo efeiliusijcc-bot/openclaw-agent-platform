@@ -13,6 +13,8 @@ import org.jeecg.modules.openclaw.dto.OpenclawSkillDraftCreateDTO;
 import org.jeecg.modules.openclaw.dto.OpenclawSkillDraftFileDTO;
 import org.jeecg.modules.openclaw.dto.OpenclawSkillDraftTestDTO;
 import org.jeecg.modules.openclaw.dto.OpenclawSkillGenerateDTO;
+import org.jeecg.modules.openclaw.dto.OpenclawSkillRepairApplyDTO;
+import org.jeecg.modules.openclaw.dto.OpenclawSkillRepairDTO;
 import org.jeecg.modules.openclaw.entity.OpenclawSkill;
 import org.jeecg.modules.openclaw.entity.OpenclawSkillDraft;
 import org.jeecg.modules.openclaw.entity.OpenclawSkillTestRun;
@@ -22,6 +24,7 @@ import org.jeecg.modules.openclaw.service.IOpenclawSkillTestRunService;
 import org.jeecg.modules.openclaw.vo.OpenclawSkillDraftFileContentVO;
 import org.jeecg.modules.openclaw.vo.OpenclawSkillDraftFileNodeVO;
 import org.jeecg.modules.openclaw.vo.OpenclawSkillDraftLintVO;
+import org.jeecg.modules.openclaw.vo.OpenclawSkillRepairVO;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -129,6 +132,18 @@ public class OpenclawSkillDraftController {
     @RequiresPermissions("openclaw:skill:draft:test")
     public Result<OpenclawSkillTestRun> runTest(@PathVariable String id, @RequestBody OpenclawSkillDraftTestDTO dto) {
         return Result.OK(draftService.runTest(id, dto));
+    }
+
+    @PostMapping("/{id}/repair")
+    @RequiresPermissions("openclaw:skill:draft:edit")
+    public Result<OpenclawSkillRepairVO> repair(@PathVariable String id, @RequestBody OpenclawSkillRepairDTO dto) {
+        return Result.OK(draftService.repairDraft(id, dto));
+    }
+
+    @PostMapping("/{id}/repair/apply")
+    @RequiresPermissions("openclaw:skill:draft:edit")
+    public Result<OpenclawSkillRepairVO> applyRepair(@PathVariable String id, @RequestBody OpenclawSkillRepairApplyDTO dto) {
+        return Result.OK(draftService.applyRepair(id, dto));
     }
 
     @PostMapping("/{id}/submit")

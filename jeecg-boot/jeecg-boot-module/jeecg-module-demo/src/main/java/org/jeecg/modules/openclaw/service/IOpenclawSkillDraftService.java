@@ -5,12 +5,15 @@ import org.jeecg.modules.openclaw.dto.OpenclawSkillDraftCreateDTO;
 import org.jeecg.modules.openclaw.dto.OpenclawSkillDraftFileDTO;
 import org.jeecg.modules.openclaw.dto.OpenclawSkillDraftTestDTO;
 import org.jeecg.modules.openclaw.dto.OpenclawSkillGenerateDTO;
+import org.jeecg.modules.openclaw.dto.OpenclawSkillRepairApplyDTO;
+import org.jeecg.modules.openclaw.dto.OpenclawSkillRepairDTO;
 import org.jeecg.modules.openclaw.entity.OpenclawSkill;
 import org.jeecg.modules.openclaw.entity.OpenclawSkillDraft;
 import org.jeecg.modules.openclaw.entity.OpenclawSkillTestRun;
 import org.jeecg.modules.openclaw.vo.OpenclawSkillDraftFileContentVO;
 import org.jeecg.modules.openclaw.vo.OpenclawSkillDraftFileNodeVO;
 import org.jeecg.modules.openclaw.vo.OpenclawSkillDraftLintVO;
+import org.jeecg.modules.openclaw.vo.OpenclawSkillRepairVO;
 
 import java.util.List;
 
@@ -36,6 +39,10 @@ public interface IOpenclawSkillDraftService extends IService<OpenclawSkillDraft>
     OpenclawSkillDraftLintVO lint(String draftId);
 
     OpenclawSkillTestRun runTest(String draftId, OpenclawSkillDraftTestDTO dto);
+
+    OpenclawSkillRepairVO repairDraft(String draftId, OpenclawSkillRepairDTO dto);
+
+    OpenclawSkillRepairVO applyRepair(String draftId, OpenclawSkillRepairApplyDTO dto);
 
     OpenclawSkillDraft submitForReview(String draftId);
 

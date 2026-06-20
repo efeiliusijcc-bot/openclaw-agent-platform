@@ -6,6 +6,7 @@
         <a-button preIcon="ant-design:reload-outlined" @click="loadTree">刷新</a-button>
         <a-button type="primary" preIcon="ant-design:save-outlined" :disabled="!currentPath || !canEdit" @click="saveCurrentFile">保存</a-button>
         <a-button preIcon="ant-design:check-circle-outlined" :disabled="!canEdit" @click="runLint">Lint</a-button>
+        <a-button preIcon="ant-design:tool-outlined" :loading="repairing" :disabled="!canEdit" @click="runRepair">AI Repair</a-button>
         <a-button preIcon="ant-design:audit-outlined" :disabled="!canSubmit" @click="submitReview">Submit</a-button>
         <a-button preIcon="ant-design:check-outlined" :disabled="!canReview" @click="approveReview">Approve</a-button>
         <a-button danger preIcon="ant-design:close-outlined" :disabled="!canReview" @click="rejectReview">Reject</a-button>
@@ -78,6 +79,25 @@
       </aside>
     </div>
 
+    <a-modal v-model:open="repairVisible" title="AI Repair Suggestions" width="920px" :footer="null" destroyOnClose>
+      <a-alert v-if="repairResult?.summary" :message="repairResult.summary" :type="repairResult.source === 'ai' ? 'success' : 'warning'" show-icon />
+      <div v-if="repairResult?.warnings?.length" class="repair-warnings">
+        <a-alert v-for="item in repairResult.warnings" :key="item" type="warning" :message="item" show-icon />
+      </div>
+      <a-empty v-if="!repairResult?.files?.length" description="No repair suggestions" />
+      <div v-for="file in repairResult?.files || []" :key="file.path" class="repair-file">
+        <div class="repair-file-header">
+          <strong>{{ file.action || 'upsert' }} {{ file.path }}</strong>
+          <a-button size="small" type="primary" :loading="applyingRepair" @click="applyRepairFile(file)">Apply</a-button>
+        </div>
+        <p v-if="file.explanation">{{ file.explanation }}</p>
+        <pre class="repair-diff">{{ file.diff || file.content }}</pre>
+      </div>
+      <a-button v-if="repairResult?.files?.length" type="primary" block :loading="applyingRepair" @click="applyAllRepairs">
+        Apply All Suggestions
+      </a-button>
+    </a-modal>
+
     <a-modal v-model:open="createVisible" :title="createDirectory ? '新建目录' : '新建文件'" @ok="submitCreateFile" destroyOnClose>
       <a-form layout="vertical">
         <a-form-item label="相对路径" required>
@@ -96,6 +116,7 @@
   import { useMessage } from '/@/hooks/web/useMessage';
   import {
     approveSkillDraft,
+    applySkillDraftRepair,
     createSkillDraftFile,
     deleteSkillDraftFile,
     getSkillDraft,
@@ -105,6 +126,7 @@
     publishSkillDraft,
     readSkillDraftFile,
     rejectSkillDraft,
+    repairSkillDraft,
     runSkillDraftTest,
     saveSkillDraftFile,
     submitSkillDraft,
@@ -122,6 +144,10 @@
   const testPrompt = ref('');
   const expectedOutput = ref('');
   const testing = ref(false);
+  const repairing = ref(false);
+  const applyingRepair = ref(false);
+  const repairVisible = ref(false);
+  const repairResult = ref<any>(null);
   const testRuns = ref<any[]>([]);
   const createVisible = ref(false);
   const createDirectory = ref(false);
@@ -239,6 +265,55 @@
       await loadTestRuns();
     } finally {
       testing.value = false;
+    }
+  }
+
+  async function runRepair() {
+    if (!canEdit.value) return;
+    repairing.value = true;
+    try {
+      const latestFailed = testRuns.value.find((item) => item.status !== 'success');
+      repairResult.value = await repairSkillDraft(draftId.value, {
+        testRunId: latestFailed?.id || draft.value?.lastTestRunId,
+        instruction: 'Analyze the latest lint and test failure, then suggest the smallest safe Skill file changes.',
+      });
+      repairVisible.value = true;
+    } finally {
+      repairing.value = false;
+    }
+  }
+
+  async function applyRepairFile(file) {
+    await applyRepairs([file]);
+  }
+
+  async function applyAllRepairs() {
+    await applyRepairs(repairResult.value?.files || []);
+  }
+
+  async function applyRepairs(files) {
+    if (!files?.length) return;
+    applyingRepair.value = true;
+    try {
+      await applySkillDraftRepair(draftId.value, {
+        reason: repairResult.value?.summary,
+        files: files.map((file) => ({
+          path: file.path,
+          action: file.action || 'upsert',
+          content: file.content || '',
+          explanation: file.explanation || '',
+        })),
+      });
+      createMessage.success('Repair applied');
+      repairVisible.value = false;
+      await loadDraft();
+      await loadTree();
+      await loadTestRuns();
+      if (currentPath.value) {
+        await onSelectFile([currentPath.value]);
+      }
+    } finally {
+      applyingRepair.value = false;
     }
   }
 
@@ -370,6 +445,35 @@
     display: flex;
     flex-direction: column;
     gap: 8px;
+  }
+
+  .repair-warnings {
+    display: grid;
+    gap: 8px;
+    margin-top: 10px;
+  }
+
+  .repair-file {
+    border: 1px solid #d9d9d9;
+    margin: 12px 0;
+    padding: 10px;
+  }
+
+  .repair-file-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .repair-diff {
+    max-height: 260px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    background: #f5f5f5;
+    padding: 8px;
+    margin: 8px 0 0;
   }
 
   .test-run-card {

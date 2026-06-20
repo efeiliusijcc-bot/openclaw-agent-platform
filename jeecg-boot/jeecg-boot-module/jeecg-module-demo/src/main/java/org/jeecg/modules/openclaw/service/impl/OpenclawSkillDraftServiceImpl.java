@@ -14,6 +14,8 @@ import org.jeecg.modules.openclaw.dto.OpenclawSkillDraftCreateDTO;
 import org.jeecg.modules.openclaw.dto.OpenclawSkillDraftFileDTO;
 import org.jeecg.modules.openclaw.dto.OpenclawSkillDraftTestDTO;
 import org.jeecg.modules.openclaw.dto.OpenclawSkillGenerateDTO;
+import org.jeecg.modules.openclaw.dto.OpenclawSkillRepairApplyDTO;
+import org.jeecg.modules.openclaw.dto.OpenclawSkillRepairDTO;
 import org.jeecg.modules.openclaw.entity.OpenclawAgent;
 import org.jeecg.modules.openclaw.entity.OpenclawAgentSkill;
 import org.jeecg.modules.openclaw.entity.OpenclawGatewayNode;
@@ -39,6 +41,7 @@ import org.jeecg.modules.openclaw.vo.OpenclawAgentRunResultVO;
 import org.jeecg.modules.openclaw.vo.OpenclawSkillDraftFileContentVO;
 import org.jeecg.modules.openclaw.vo.OpenclawSkillDraftFileNodeVO;
 import org.jeecg.modules.openclaw.vo.OpenclawSkillDraftLintVO;
+import org.jeecg.modules.openclaw.vo.OpenclawSkillRepairVO;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -62,6 +65,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Date;
 import java.util.LinkedHashMap;
@@ -437,6 +441,89 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
             updateById(draft);
             auditLogService.logFailure("skill_draft_test_failed", "skill_test_run", run.getId(), run);
             return run;
+        }
+    }
+
+    @Override
+    public OpenclawSkillRepairVO repairDraft(String draftId, OpenclawSkillRepairDTO dto) {
+        OpenclawSkillDraft draft = requireDraft(draftId, false);
+        if (REVIEW_LOCKED_STATUSES.contains(draft.getStatus())) {
+            throw new JeecgBootException("Current draft status does not allow repair.");
+        }
+        OpenclawSkillTestRun run = findRepairTestRun(draft, dto == null ? null : dto.getTestRunId());
+        try {
+            Map<String, String> files = readRepairableFiles(draftRoot(draft));
+            OpenclawSkillRepairVO repair = callConfiguredSkillRepair(draft, run, files, dto);
+            if (repair == null) {
+                repair = fallbackRepair(draft, run, files, dto);
+            }
+            repair.setDraftId(draft.getId());
+            repair.setTestRunId(run == null ? null : run.getId());
+            auditLogService.logSuccess("skill_draft_ai_repair_preview", "skill_draft", draft.getId(), Map.of(
+                "testRunId", repair.getTestRunId(),
+                "source", repair.getSource(),
+                "fileCount", repair.getFiles().size()
+            ));
+            return repair;
+        } catch (IOException e) {
+            throw new JeecgBootException("Analyze Skill draft repair failed: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public OpenclawSkillRepairVO applyRepair(String draftId, OpenclawSkillRepairApplyDTO dto) {
+        OpenclawSkillDraft draft = requireDraft(draftId, true);
+        if (dto == null || dto.getFiles() == null || dto.getFiles().isEmpty()) {
+            throw new JeecgBootException("Repair files are required.");
+        }
+        Path root = draftRoot(draft);
+        List<OpenclawSkillRepairVO.FileSuggestion> applied = new ArrayList<>();
+        try {
+            for (OpenclawSkillRepairApplyDTO.FilePatch patch : dto.getFiles()) {
+                if (patch == null || !StringUtils.hasText(patch.getPath())) {
+                    continue;
+                }
+                String action = StringUtils.hasText(patch.getAction()) ? patch.getAction().trim() : "upsert";
+                if (!"upsert".equalsIgnoreCase(action) && !"update".equalsIgnoreCase(action) && !"create".equalsIgnoreCase(action)) {
+                    throw new JeecgBootException("Unsupported repair action: " + action);
+                }
+                String content = patch.getContent() == null ? "" : trim(patch.getContent(), 200_000);
+                byte[] data = content.getBytes(StandardCharsets.UTF_8);
+                pathSafetyService.validateWritableFile(root, patch.getPath(), data.length);
+                Path target = pathSafetyService.resolve(root, patch.getPath());
+                pathSafetyService.rejectIfOutsideRoot(root, target);
+                if (Files.exists(target) && !Files.isRegularFile(target)) {
+                    throw new JeecgBootException("Only regular files can be repaired: " + patch.getPath());
+                }
+                Files.createDirectories(target.getParent());
+                if (Files.exists(target)) {
+                    Files.write(target, data, StandardOpenOption.TRUNCATE_EXISTING);
+                } else {
+                    Files.write(target, data, StandardOpenOption.CREATE_NEW);
+                }
+                OpenclawSkillRepairVO.FileSuggestion item = new OpenclawSkillRepairVO.FileSuggestion();
+                item.setPath(patch.getPath());
+                item.setAction(action);
+                item.setExplanation(patch.getExplanation());
+                applied.add(item);
+            }
+            if (applied.isEmpty()) {
+                throw new JeecgBootException("No repair file can be applied.");
+            }
+            scanFiles(draft);
+            auditLogService.logSuccess("skill_draft_ai_repair_apply", "skill_draft", draft.getId(), Map.of(
+                "reason", trim(dto.getReason(), 1000),
+                "files", applied
+            ));
+            OpenclawSkillRepairVO result = new OpenclawSkillRepairVO();
+            result.setDraftId(draft.getId());
+            result.setSource("applied");
+            result.setSummary("Applied " + applied.size() + " repair file change(s). Run Lint and tests again.");
+            result.setFiles(applied);
+            return result;
+        } catch (IOException e) {
+            throw new JeecgBootException("Apply Skill repair failed: " + e.getMessage(), e);
         }
     }
 
@@ -994,6 +1081,260 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
             Files.createDirectories(target.getParent());
             Files.writeString(target, entry.getValue(), StandardCharsets.UTF_8, StandardOpenOption.CREATE_NEW);
         }
+    }
+
+    private OpenclawSkillTestRun findRepairTestRun(OpenclawSkillDraft draft, String testRunId) {
+        if (StringUtils.hasText(testRunId)) {
+            OpenclawSkillTestRun run = testRunService.getById(testRunId);
+            if (run == null || !draft.getId().equals(run.getDraftId())) {
+                throw new JeecgBootException("Test run does not belong to this draft.");
+            }
+            return run;
+        }
+        if (StringUtils.hasText(draft.getLastTestRunId())) {
+            OpenclawSkillTestRun run = testRunService.getById(draft.getLastTestRunId());
+            if (run != null && draft.getId().equals(run.getDraftId())) {
+                return run;
+            }
+        }
+        return testRunService.getOne(new LambdaQueryWrapper<OpenclawSkillTestRun>()
+            .eq(OpenclawSkillTestRun::getDraftId, draft.getId())
+            .eq(OpenclawSkillTestRun::getDelFlag, OpenclawConstants.DEL_FLAG_NORMAL)
+            .orderByDesc(OpenclawSkillTestRun::getCreateTime)
+            .last("limit 1"), false);
+    }
+
+    private Map<String, String> readRepairableFiles(Path root) throws IOException {
+        Map<String, String> files = new LinkedHashMap<>();
+        try (var walk = Files.walk(root)) {
+            for (Path item : walk.sorted().toList()) {
+                pathSafetyService.rejectIfOutsideRoot(root, item);
+                if (!Files.isRegularFile(item)) {
+                    continue;
+                }
+                String relative = toRelative(root, item);
+                pathSafetyService.rejectBlockedExtension(relative);
+                long size = Files.size(item);
+                if (size > 200_000L) {
+                    continue;
+                }
+                if (isTextRepairFile(relative)) {
+                    files.put(relative, Files.readString(item, StandardCharsets.UTF_8));
+                }
+            }
+        }
+        return files;
+    }
+
+    private boolean isTextRepairFile(String path) {
+        String value = path.toLowerCase(Locale.ROOT);
+        return value.endsWith(".md") || value.endsWith(".txt") || value.endsWith(".py") || value.endsWith(".json")
+            || value.endsWith(".yaml") || value.endsWith(".yml") || value.endsWith(".toml") || value.endsWith(".ini");
+    }
+
+    private OpenclawSkillRepairVO callConfiguredSkillRepair(OpenclawSkillDraft draft, OpenclawSkillTestRun run, Map<String, String> files, OpenclawSkillRepairDTO dto) {
+        if (!StringUtils.hasText(skillAiBaseUrl) || !StringUtils.hasText(skillAiModel)) {
+            return null;
+        }
+        try {
+            String baseUrl = skillAiBaseUrl.trim();
+            while (baseUrl.endsWith("/")) {
+                baseUrl = baseUrl.substring(0, baseUrl.length() - 1);
+            }
+            JSONObject body = new JSONObject(true);
+            body.put("model", skillAiModel.trim());
+            body.put("temperature", 0.1);
+            JSONArray messages = new JSONArray();
+            messages.add(message("system", "You repair OpenClaw Skill draft files. Return only strict JSON with fields summary, files, warnings. files is an array of {path, action, explanation, content}. Only suggest safe text file upserts. Preserve existing behavior unless needed to fix lint or test failures."));
+            messages.add(message("user", buildRepairPrompt(draft, run, files, dto)));
+            body.put("messages", messages);
+
+            HttpRequest.Builder builder = HttpRequest.newBuilder()
+                .uri(URI.create(baseUrl + "/chat/completions"))
+                .timeout(Duration.ofSeconds(90))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(body.toJSONString(), StandardCharsets.UTF_8));
+            if (StringUtils.hasText(skillAiApiKey)) {
+                builder.header("Authorization", "Bearer " + skillAiApiKey.trim());
+            }
+            HttpResponse<String> response = HttpClient.newHttpClient().send(builder.build(), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                throw new JeecgBootException("Skill AI repair returned HTTP " + response.statusCode() + ": " + trim(response.body(), 1000));
+            }
+            JSONObject root = JSON.parseObject(response.body());
+            JSONArray choices = root.getJSONArray("choices");
+            JSONObject first = choices == null || choices.isEmpty() ? null : choices.getJSONObject(0);
+            JSONObject responseMessage = first == null ? null : first.getJSONObject("message");
+            String content = responseMessage == null ? null : responseMessage.getString("content");
+            if (!StringUtils.hasText(content)) {
+                throw new JeecgBootException("Skill AI repair returned empty content.");
+            }
+            return parseRepairResult(draft, run, files, JSON.parseObject(extractJsonObject(content)), "ai");
+        } catch (Exception e) {
+            auditLogService.logFailure("skill_draft_ai_repair_model", "skill_draft", draft.getId(), Map.of("message", trim(e.getMessage(), 1000)));
+            return null;
+        }
+    }
+
+    private String buildRepairPrompt(OpenclawSkillDraft draft, OpenclawSkillTestRun run, Map<String, String> files, OpenclawSkillRepairDTO dto) {
+        StringBuilder builder = new StringBuilder();
+        builder.append("Draft: ").append(draft.getDraftName()).append(" / ").append(draft.getSkillSlug()).append('\n');
+        builder.append("Status: ").append(draft.getStatus()).append('\n');
+        builder.append("User instruction: ").append(safeText(dto == null ? null : dto.getInstruction())).append("\n\n");
+        if (run != null) {
+            builder.append("Test run status: ").append(run.getStatus()).append('\n');
+            builder.append("Prompt:\n").append(safeText(run.getPrompt())).append("\n\n");
+            builder.append("Expected output:\n").append(safeText(run.getExpectedOutput())).append("\n\n");
+            builder.append("Output summary:\n").append(safeText(run.getOutputSummary())).append("\n\n");
+            builder.append("Error message:\n").append(safeText(run.getErrorMessage())).append("\n\n");
+        }
+        builder.append("Files:\n");
+        for (Map.Entry<String, String> entry : files.entrySet()) {
+            builder.append("\n--- ").append(entry.getKey()).append(" ---\n");
+            builder.append(trim(entry.getValue(), 12_000)).append('\n');
+        }
+        return builder.toString();
+    }
+
+    private OpenclawSkillRepairVO parseRepairResult(OpenclawSkillDraft draft, OpenclawSkillTestRun run, Map<String, String> currentFiles, JSONObject json, String source) {
+        OpenclawSkillRepairVO result = new OpenclawSkillRepairVO();
+        result.setDraftId(draft.getId());
+        result.setTestRunId(run == null ? null : run.getId());
+        result.setSource(source);
+        result.setSummary(trim(firstText(json.getString("summary"), "Repair suggestions generated."), 4000));
+        JSONArray warnings = json.getJSONArray("warnings");
+        if (warnings != null) {
+            for (Object item : warnings) {
+                if (item != null) {
+                    result.getWarnings().add(trim(String.valueOf(item), 1000));
+                }
+            }
+        }
+        JSONArray files = json.getJSONArray("files");
+        if (files != null) {
+            for (Object item : files) {
+                if (item instanceof JSONObject file) {
+                    addRepairSuggestion(result, currentFiles, file.getString("path"), file.getString("action"), file.getString("explanation"), file.getString("content"));
+                }
+            }
+        }
+        if (result.getFiles().isEmpty()) {
+            result.getWarnings().add("The repair model did not return any applicable file changes.");
+        }
+        return result;
+    }
+
+    private OpenclawSkillRepairVO fallbackRepair(OpenclawSkillDraft draft, OpenclawSkillTestRun run, Map<String, String> files, OpenclawSkillRepairDTO dto) {
+        OpenclawSkillRepairVO result = new OpenclawSkillRepairVO();
+        result.setDraftId(draft.getId());
+        result.setTestRunId(run == null ? null : run.getId());
+        result.setSource("fallback");
+        result.setSummary("AI repair model is not configured or unavailable. Generated safe repair notes and lint-oriented suggestions.");
+        result.getWarnings().add("Review every suggested change before applying it, then rerun Lint and the failed test.");
+        String skillMd = files.get("SKILL.md");
+        if (StringUtils.hasText(skillMd)) {
+            String improved = ensureSkillMdSections(skillMd, draft, run);
+            if (!improved.equals(skillMd)) {
+                addRepairSuggestion(result, files, "SKILL.md", "update", "Add missing standard Skill sections required by lint.", improved);
+            }
+        }
+        String notes = repairNotesContent(draft, run, dto);
+        addRepairSuggestion(result, files, "REPAIR_NOTES.md", "upsert", "Record failure context and manual follow-up checks for this repair round.", notes);
+        return result;
+    }
+
+    private String ensureSkillMdSections(String content, OpenclawSkillDraft draft, OpenclawSkillTestRun run) {
+        String value = content;
+        if (!value.contains("## Purpose")) {
+            value += "\n\n## Purpose\n\n" + safeText(firstText(draft.getDescription(), "Describe the Skill purpose.")) + "\n";
+        }
+        if (!value.contains("## When to use")) {
+            value += "\n\n## When to use\n\nUse this Skill when the task matches " + safeText(draft.getSkillSlug()) + ".\n";
+        }
+        if (!value.contains("## Inputs")) {
+            value += "\n\n## Inputs\n\n- User request\n- Relevant workspace files or context\n";
+        }
+        if (!value.contains("## Outputs")) {
+            value += "\n\n## Outputs\n\n- A response or artifact that satisfies the request\n- Notes about assumptions and follow-up checks\n";
+        }
+        if (!value.contains("## Examples")) {
+            value += "\n\n## Examples\n\n" + safeText(run == null ? "Run a smoke test for this Skill." : run.getPrompt()) + "\n";
+        }
+        if (!value.contains("## Safety")) {
+            value += "\n\n## Safety\n\nDo not run destructive commands or access files outside the workspace. Keep external calls explicit and auditable.\n";
+        }
+        return value;
+    }
+
+    private String repairNotesContent(OpenclawSkillDraft draft, OpenclawSkillTestRun run, OpenclawSkillRepairDTO dto) {
+        StringBuilder builder = new StringBuilder();
+        builder.append("# Repair Notes\n\n");
+        builder.append("- Draft: ").append(safeText(draft.getDraftName())).append(" (`").append(safeText(draft.getSkillSlug())).append("`)\n");
+        builder.append("- Status: ").append(safeText(draft.getStatus())).append("\n");
+        if (run != null) {
+            builder.append("- Test run: ").append(run.getId()).append("\n");
+            builder.append("- Test status: ").append(safeText(run.getStatus())).append("\n\n");
+            builder.append("## Prompt\n\n").append(safeText(run.getPrompt())).append("\n\n");
+            builder.append("## Output Summary\n\n").append(safeText(run.getOutputSummary())).append("\n\n");
+            builder.append("## Error Message\n\n").append(safeText(run.getErrorMessage())).append("\n\n");
+        }
+        if (dto != null && StringUtils.hasText(dto.getInstruction())) {
+            builder.append("## Repair Instruction\n\n").append(safeText(dto.getInstruction())).append("\n\n");
+        }
+        builder.append("## Next Checks\n\n- Run Lint.\n- Rerun the failed test prompt.\n- Remove this note before publishing if it is not useful to reviewers.\n");
+        return builder.toString();
+    }
+
+    private void addRepairSuggestion(OpenclawSkillRepairVO result, Map<String, String> currentFiles, String path, String action, String explanation, String content) {
+        if (!StringUtils.hasText(path)) {
+            return;
+        }
+        String normalized = path.replace('\\', '/').trim();
+        if (normalized.startsWith("/") || normalized.contains("../") || normalized.equals("..") || normalized.startsWith("../")) {
+            result.getWarnings().add("Skipped unsafe repair path: " + path);
+            return;
+        }
+        pathSafetyService.rejectBlockedExtension(normalized);
+        OpenclawSkillRepairVO.FileSuggestion file = new OpenclawSkillRepairVO.FileSuggestion();
+        file.setPath(normalized);
+        file.setAction(StringUtils.hasText(action) ? action.trim() : "upsert");
+        file.setExplanation(trim(explanation, 2000));
+        file.setContent(content == null ? "" : trim(content, 200_000));
+        file.setDiff(simpleDiff(currentFiles.get(normalized), file.getContent()));
+        result.getFiles().add(file);
+    }
+
+    private String simpleDiff(String before, String after) {
+        String previous = before == null ? "" : before;
+        String next = after == null ? "" : after;
+        if (previous.equals(next)) {
+            return "No content changes.";
+        }
+        String[] oldLines = previous.split("\\R", -1);
+        String[] newLines = next.split("\\R", -1);
+        StringBuilder diff = new StringBuilder();
+        diff.append("--- current\n+++ suggested\n");
+        int max = Math.max(oldLines.length, newLines.length);
+        int emitted = 0;
+        for (int i = 0; i < max && emitted < 80; i++) {
+            String oldLine = i < oldLines.length ? oldLines[i] : null;
+            String newLine = i < newLines.length ? newLines[i] : null;
+            if (oldLine == null) {
+                diff.append("+").append(newLine).append('\n');
+                emitted++;
+            } else if (newLine == null) {
+                diff.append("-").append(oldLine).append('\n');
+                emitted++;
+            } else if (!oldLine.equals(newLine)) {
+                diff.append("-").append(oldLine).append('\n');
+                diff.append("+").append(newLine).append('\n');
+                emitted += 2;
+            }
+        }
+        if (max > 80) {
+            diff.append("... diff truncated ...\n");
+        }
+        return diff.toString();
     }
 
     private TestAgentContext prepareTestAgent(OpenclawSkillDraft draft, OpenclawSkillTestRun run) throws IOException {
