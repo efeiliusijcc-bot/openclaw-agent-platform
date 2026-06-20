@@ -117,6 +117,12 @@ public class OpenclawSkillDraftController {
         return Result.OK(draftService.runTest(id, dto));
     }
 
+    @PostMapping("/{id}/submit")
+    @RequiresPermissions("openclaw:skill:draft:submit")
+    public Result<OpenclawSkillDraft> submit(@PathVariable String id) {
+        return Result.OK(draftService.submitForReview(id));
+    }
+
     @GetMapping("/{id}/tests")
     @RequiresPermissions("openclaw:skill:draft:edit")
     public Result<IPage<OpenclawSkillTestRun>> testRuns(@PathVariable String id,

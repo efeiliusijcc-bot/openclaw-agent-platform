@@ -346,6 +346,38 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
         }
     }
 
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public OpenclawSkillDraft submitForReview(String draftId) {
+        OpenclawSkillDraft draft = requireDraft(draftId, false);
+        if ("submitted".equals(draft.getStatus()) || "approved".equals(draft.getStatus()) || "published".equals(draft.getStatus())) {
+            throw new JeecgBootException("Current draft status does not allow submit.");
+        }
+
+        OpenclawSkillDraftLintVO lint = lint(draftId);
+        if (!Boolean.TRUE.equals(lint.getPassed())) {
+            throw new JeecgBootException("Lint must pass before submit.");
+        }
+
+        Long successTestCount = testRunService.count(new LambdaQueryWrapper<OpenclawSkillTestRun>()
+            .eq(OpenclawSkillTestRun::getDraftId, draft.getId())
+            .eq(OpenclawSkillTestRun::getStatus, OpenclawConstants.RUN_STATUS_SUCCESS)
+            .eq(OpenclawSkillTestRun::getDelFlag, OpenclawConstants.DEL_FLAG_NORMAL));
+        if (successTestCount == null || successTestCount < 1 || !OpenclawConstants.RUN_STATUS_SUCCESS.equals(draft.getLastTestStatus())) {
+            throw new JeecgBootException("At least one successful test run is required before submit.");
+        }
+
+        draft.setStatus("submitted");
+        draft.setSubmitTime(new Date());
+        draft.setReviewStatus("pending");
+        draft.setReviewComment(null);
+        draft.setReviewedBy(null);
+        draft.setReviewedTime(null);
+        updateById(draft);
+        auditLogService.log("skill_draft_submit", "skill_draft", draft.getId(), draft);
+        return draft;
+    }
+
     private OpenclawSkillDraft requireDraft(String draftId, boolean editable) {
         OpenclawSkillDraft draft = getById(draftId);
         if (draft == null || Integer.valueOf(OpenclawConstants.DEL_FLAG_DELETED).equals(draft.getDelFlag())) {

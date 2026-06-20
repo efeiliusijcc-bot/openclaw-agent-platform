@@ -6,6 +6,7 @@
         <a-button preIcon="ant-design:reload-outlined" @click="loadTree">刷新</a-button>
         <a-button type="primary" preIcon="ant-design:save-outlined" :disabled="!currentPath" @click="saveCurrentFile">保存</a-button>
         <a-button preIcon="ant-design:check-circle-outlined" @click="runLint">Lint</a-button>
+        <a-button preIcon="ant-design:audit-outlined" @click="submitReview">Submit</a-button>
       </a-space>
       <div class="current-path">{{ currentPath || '请选择文件' }}</div>
     </div>
@@ -99,6 +100,7 @@
     readSkillDraftFile,
     runSkillDraftTest,
     saveSkillDraftFile,
+    submitSkillDraft,
   } from '../api';
 
   const route = useRoute();
@@ -207,6 +209,17 @@
     } finally {
       testing.value = false;
     }
+  }
+
+  function submitReview() {
+    Modal.confirm({
+      title: 'Submit this draft for review?',
+      onOk: async () => {
+        await submitSkillDraft(draftId.value);
+        createMessage.success('Submitted for review');
+        goBack();
+      },
+    });
   }
 
   async function loadTestRuns() {

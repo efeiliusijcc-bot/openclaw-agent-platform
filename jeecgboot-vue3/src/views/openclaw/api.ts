@@ -37,6 +37,7 @@ export const deleteSkillDraftFile = (id: string, path: string) =>
 export const lintSkillDraft = (id: string) => defHttp.post({ url: `/openclaw/skill/draft/${id}/lint` });
 export const runSkillDraftTest = (id: string, params) => defHttp.post({ url: `/openclaw/skill/draft/${id}/test`, params, timeout: 90 * 1000 });
 export const listSkillDraftTests = (id: string, params) => defHttp.get({ url: `/openclaw/skill/draft/${id}/tests`, params });
+export const submitSkillDraft = (id: string) => defHttp.post({ url: `/openclaw/skill/draft/${id}/submit` });
 
 export const listRuns = (params) => defHttp.get({ url: '/openclaw/run/list', params });
 export const getRunDetail = (id: string) => defHttp.get({ url: `/openclaw/run/${id}` });

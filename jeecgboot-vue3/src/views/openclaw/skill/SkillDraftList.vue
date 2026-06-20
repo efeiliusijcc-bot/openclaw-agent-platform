@@ -42,10 +42,11 @@
 
 <script lang="ts" setup name="OpenclawSkillDraftList">
   import { reactive, ref } from 'vue';
+  import { Modal } from 'ant-design-vue';
   import { useRouter } from 'vue-router';
   import { BasicTable, TableAction, useTable } from '/@/components/Table';
   import { useMessage } from '/@/hooks/web/useMessage';
-  import { addSkillDraft, createSkillDraftFromSkill, lintSkillDraft, listSkillDrafts } from '../api';
+  import { addSkillDraft, createSkillDraftFromSkill, lintSkillDraft, listSkillDrafts, submitSkillDraft } from '../api';
   import { commonTimeColumns, keywordSearch } from '../common';
 
   const router = useRouter();
@@ -136,10 +137,26 @@
     reload();
   }
 
+  function canSubmit(record) {
+    return !['submitted', 'approved', 'published'].includes(record.status) && record.lastTestStatus === 'success';
+  }
+
+  function submitReview(record) {
+    Modal.confirm({
+      title: `Submit ${record.draftName} for review?`,
+      onOk: async () => {
+        await submitSkillDraft(record.id);
+        createMessage.success('Submitted for review');
+        reload();
+      },
+    });
+  }
+
   function actions(record) {
     return [
       { label: '编辑', auth: 'openclaw:skill:draft:edit', onClick: () => openEditor(record) },
       { label: 'Lint', auth: 'openclaw:skill:draft:lint', onClick: () => runLint(record) },
+      { label: 'Submit', auth: 'openclaw:skill:draft:submit', ifShow: canSubmit(record), onClick: () => submitReview(record) },
     ];
   }
 </script>

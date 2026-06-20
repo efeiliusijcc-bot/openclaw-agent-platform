@@ -30,4 +30,6 @@ public interface IOpenclawSkillDraftService extends IService<OpenclawSkillDraft>
     OpenclawSkillDraftLintVO lint(String draftId);
 
     OpenclawSkillTestRun runTest(String draftId, OpenclawSkillDraftTestDTO dto);
+
+    OpenclawSkillDraft submitForReview(String draftId);
 }
