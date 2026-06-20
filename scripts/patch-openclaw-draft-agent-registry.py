@@ -17,7 +17,9 @@ HELPER = r'''
 // JeecgBoot OpenClaw Skill Draft temporary agent registry patch.
 import { createRequire as __jeecgCreateRequire } from "node:module";
 const __jeecgRequire = __jeecgCreateRequire(import.meta.url);
+const __jeecgDraftDebug = process.env.OPENCLAW_DRAFT_AGENT_DEBUG === "1";
 function __jeecgDraftLog(event, data = {}) {
+	if (!__jeecgDraftDebug && event !== "read_failed") return;
 	try {
 		console.error("[jeecg-draft-agent] " + JSON.stringify({ event, ...data }));
 	} catch {
@@ -67,7 +69,8 @@ function __jeecgReadDraftAgentEntries() {
 				id: entry.id,
 				workspace: entry.workspace,
 				skills,
-				identity: entry.identity && typeof entry.identity === "object" ? entry.identity : { name: entry.id }
+				identity: entry.identity && typeof entry.identity === "object" ? entry.identity : { name: entry.id },
+				...(entry.model && typeof entry.model === "object" ? { model: entry.model } : {})
 			});
 		}
 		__jeecgDraftLog("read", { draftAgentsPath: registryPath, total: entries.length, active: active.length, expired, invalid });

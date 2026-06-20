@@ -77,6 +77,12 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
     @Value("${openclaw.run.timeout-seconds:${OPENCLAW_RUN_TIMEOUT_SECONDS:600}}")
     private Long runTimeoutSeconds;
 
+    @Value("${openclaw.run.model-override:${OPENCLAW_RUN_MODEL_OVERRIDE:}}")
+    private String runModelOverride;
+
+    @Value("${openclaw.skill-draft.test-model:${OPENCLAW_DRAFT_TEST_MODEL:${OPENCLAW_RUN_MODEL_OVERRIDE:}}}")
+    private String draftTestModelOverride;
+
     @Value("${openclaw.gateway.base-url:${OPENCLAW_GATEWAY_BASE_URL:${OPENCLAW_GATEWAY_URL:http://172.17.0.1:18089}}}")
     private String defaultGatewayBaseUrl;
 
@@ -100,7 +106,7 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
             checkRunQuotaForExecution(user, agent, run.getId());
             markRunRunning(run, agent);
             gatewayRunningTracked = true;
-            CliResult result = executeCli(agent.getAgentKey(), prompt);
+            CliResult result = executeCli(agent.getAgentKey(), prompt, null, null, runModelOverride);
             Date finishTime = new Date();
             run.setFinishTime(finishTime);
             run.setDurationMs(finishTime.getTime() - startTime.getTime());
@@ -161,7 +167,7 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
             markRunRunning(run, draftAgent);
             gatewayRunningTracked = true;
             String sessionKey = "agent:" + draftAgent.getAgentKey() + ":draft-test-" + testRunId;
-            CliResult result = executeCli(draftAgent.getAgentKey(), prompt, sessionKey, testRunId);
+            CliResult result = executeCli(draftAgent.getAgentKey(), prompt, sessionKey, testRunId, draftTestModelOverride);
             Date finishTime = new Date();
             run.setFinishTime(finishTime);
             run.setDurationMs(finishTime.getTime() - startTime.getTime());
@@ -772,10 +778,10 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
     }
 
     private CliResult executeCli(String agentKey, String prompt) throws Exception {
-        return executeCli(agentKey, prompt, null, null);
+        return executeCli(agentKey, prompt, null, null, runModelOverride);
     }
 
-    private CliResult executeCli(String agentKey, String prompt, String sessionKey, String testRunId) throws Exception {
+    private CliResult executeCli(String agentKey, String prompt, String sessionKey, String testRunId, String modelOverride) throws Exception {
         List<String> command = new ArrayList<>();
         command.add(StringUtils.hasText(openclawCliPath) ? openclawCliPath : "openclaw");
         command.add("agent");
@@ -784,6 +790,10 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
         if (StringUtils.hasText(sessionKey)) {
             command.add("--session-key");
             command.add(sessionKey);
+        }
+        if (StringUtils.hasText(modelOverride)) {
+            command.add("--model");
+            command.add(modelOverride.trim());
         }
         command.add("--message");
         command.add(prompt);

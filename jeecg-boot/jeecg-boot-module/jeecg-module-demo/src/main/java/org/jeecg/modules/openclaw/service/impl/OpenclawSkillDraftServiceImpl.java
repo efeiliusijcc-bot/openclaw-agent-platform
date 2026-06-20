@@ -130,6 +130,9 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
     @Value("${openclaw.gateway.draft-agent-ttl-seconds:${OPENCLAW_GATEWAY_DRAFT_AGENT_TTL_SECONDS:600}}")
     private Long draftAgentTtlSeconds;
 
+    @Value("${openclaw.skill-draft.test-model:${OPENCLAW_DRAFT_TEST_MODEL:${OPENCLAW_RUN_MODEL_OVERRIDE:}}}")
+    private String draftTestModelOverride;
+
     @Override
     @Transactional(rollbackFor = Exception.class)
     public OpenclawSkillDraft createDraft(OpenclawSkillDraftCreateDTO dto) {
@@ -1658,6 +1661,11 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
         entry.put("testRunId", run.getId());
         entry.put("createdAt", now);
         entry.put("expiresAt", now + ttlMillis);
+        if (StringUtils.hasText(draftTestModelOverride)) {
+            JSONObject model = new JSONObject(true);
+            model.put("primary", draftTestModelOverride.trim());
+            entry.put("model", model);
+        }
         JSONObject identity = new JSONObject(true);
         identity.put("name", context.agent.getName());
         entry.put("identity", identity);
