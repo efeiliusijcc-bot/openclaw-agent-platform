@@ -13,6 +13,8 @@
 - After Draft Agents were visible to Gateway, test execution still failed because OpenClaw CLI defaulted to the built-in `openai/gpt-5.5`; this server provider accepts `openai/mimo-v2.5-pro`. Gateway returned `FailoverError: LLM request failed: provider rejected the request schema or tool payload`.
 - Fix: backend now supports `OPENCLAW_DRAFT_TEST_MODEL` / `openclaw.skill-draft.test-model`. Draft Test CLI execution passes `--model`, and the temporary draft-agent registry entry includes `model.primary`.
 - Gateway registry diagnostics were too noisy on stderr and polluted CLI failure text. `scripts/patch-openclaw-draft-agent-registry.py` now emits active/read/merge diagnostics only with `OPENCLAW_DRAFT_AGENT_DEBUG=1`; `read_failed` remains visible.
+- Additional Gateway WebSocket diagnostic patch: `client-1OJ6okpi.js` now emits `[jeecg-gateway-ws-close] {"code":...,"reason":...}` for non-1000 closes, or for all closes when `OPENCLAW_DRAFT_AGENT_DEBUG=1`.
+- Current evidence does not prove a true no-external-model Echo execution path. `openclaw agent` still runs an agent turn through the configured model; the Echo smoke Skill itself does not call external tools, but Gateway execution currently uses `openai/mimo-v2.5-pro`. TODO: only mark no-external-model complete if OpenClaw exposes a supported local skill runner or the product adds a clearly separated non-Gateway deterministic test mode.
 
 ### Mistakes Recorded
 
@@ -28,7 +30,7 @@
 - Echo Draft acceptance passed: create draft, save files, Lint, Test, and expected `ECHO_OK_*` output all succeeded.
 - Invoice AI Edit acceptance passed: preview, apply, read back invoice content, Lint, Test, and test history succeeded.
 - AI Repair after failed test passed: inserting `rm -rf` into `main.py` made Test fail at lint; AI Repair returned a summary and file suggestion.
-- Gateway logs after 04:30 contained no `1006`, `FailoverError`, or `[jeecg-draft-agent]` diagnostic noise.
+- After the WebSocket close diagnostic patch, Echo Draft, Invoice AI Edit, and AI Repair failed-test smoke all still pass. Recent Gateway logs contain no `1006` or `FailoverError`; one non-1000 close diagnostic was observed as `code=1005, reason=""`.
 
 ## 2026-06-21 - Skill Draft Test Temporary Agent Registry
 
