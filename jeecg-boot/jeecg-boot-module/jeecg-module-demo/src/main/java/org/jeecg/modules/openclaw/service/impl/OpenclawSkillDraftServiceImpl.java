@@ -52,6 +52,7 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
     private static final String DRAFT_ROOT = "/data/openclaw-platform/skill-drafts";
     private static final String TEST_WORKSPACE_ROOT = "/data/openclaw-platform/skill-test-workspaces";
     private static final Set<String> EDITABLE_STATUSES = Set.of("editing", "lint_failed", "lint_passed", "test_failed", "rejected");
+    private static final Set<String> REVIEW_LOCKED_STATUSES = Set.of("submitted", "approved", "published");
     private static final Set<String> DANGEROUS_CODE_KEYWORDS = Set.of(
         "os.system", "subprocess", "rm -rf", "curl ", "wget ", "chmod", "sudo", "eval(", "exec(", "socket", "requests", "open('/etc"
     );
@@ -152,6 +153,11 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
         }
         auditLogService.log("skill_draft_create_from_skill", "skill_draft", draft.getId(), draft);
         return draft;
+    }
+
+    @Override
+    public OpenclawSkillDraft getDraftForAccess(String draftId) {
+        return requireDraft(draftId, false);
     }
 
     @Override
@@ -274,6 +280,9 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
     @Transactional(rollbackFor = Exception.class)
     public OpenclawSkillDraftLintVO lint(String draftId) {
         OpenclawSkillDraft draft = requireDraft(draftId, false);
+        if (REVIEW_LOCKED_STATUSES.contains(draft.getStatus())) {
+            throw new JeecgBootException("Current draft status does not allow lint.");
+        }
         OpenclawSkillDraftLintVO result = new OpenclawSkillDraftLintVO();
         Path root = draftRoot(draft);
         try {
@@ -299,6 +308,9 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
             throw new JeecgBootException("Test prompt is required.");
         }
         OpenclawSkillDraft draft = requireDraft(draftId, false);
+        if (REVIEW_LOCKED_STATUSES.contains(draft.getStatus())) {
+            throw new JeecgBootException("Current draft status does not allow test run.");
+        }
         LoginUser user = permissionService.currentUser();
         Date start = new Date();
         OpenclawSkillTestRun run = new OpenclawSkillTestRun();
@@ -378,14 +390,65 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
         return draft;
     }
 
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public OpenclawSkillDraft approveDraft(String draftId) {
+        OpenclawSkillDraft draft = requireReviewableDraft(draftId);
+        LoginUser reviewer = permissionService.currentUser();
+        draft.setStatus("approved");
+        draft.setReviewStatus("approved");
+        draft.setReviewComment(null);
+        draft.setReviewedBy(reviewer.getUsername());
+        draft.setReviewedTime(new Date());
+        updateById(draft);
+        auditLogService.logSuccess("skill_draft_approve", "skill_draft", draft.getId(), draft);
+        return draft;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public OpenclawSkillDraft rejectDraft(String draftId, String reason) {
+        if (!StringUtils.hasText(reason)) {
+            throw new JeecgBootException("Reject reason is required.");
+        }
+        OpenclawSkillDraft draft = requireReviewableDraft(draftId);
+        LoginUser reviewer = permissionService.currentUser();
+        draft.setStatus("rejected");
+        draft.setReviewStatus("rejected");
+        draft.setReviewComment(trim(reason, 1000));
+        draft.setReviewedBy(reviewer.getUsername());
+        draft.setReviewedTime(new Date());
+        updateById(draft);
+        auditLogService.logFailure("skill_draft_reject", "skill_draft", draft.getId(), draft);
+        return draft;
+    }
+
     private OpenclawSkillDraft requireDraft(String draftId, boolean editable) {
         OpenclawSkillDraft draft = getById(draftId);
         if (draft == null || Integer.valueOf(OpenclawConstants.DEL_FLAG_DELETED).equals(draft.getDelFlag())) {
             throw new JeecgBootException("Skill draft does not exist.");
         }
-        permissionService.checkOwnerOrAdmin(draft.getOwnerUserId());
+        LoginUser user = permissionService.currentUser();
+        if (editable || !permissionService.isSkillReviewer(user)) {
+            permissionService.checkOwnerOrAdmin(draft.getOwnerUserId());
+        }
         if (editable && !EDITABLE_STATUSES.contains(draft.getStatus())) {
             throw new JeecgBootException("Current draft status does not allow editing.");
+        }
+        return draft;
+    }
+
+    private OpenclawSkillDraft requireReviewableDraft(String draftId) {
+        LoginUser reviewer = permissionService.currentUser();
+        if (!permissionService.isSkillReviewer(reviewer)) {
+            throw new JeecgBootException("Only OpenClaw Skill reviewers can review Skill drafts.");
+        }
+        OpenclawSkillDraft draft = getById(draftId);
+        if (draft == null || Integer.valueOf(OpenclawConstants.DEL_FLAG_DELETED).equals(draft.getDelFlag())) {
+            throw new JeecgBootException("Skill draft does not exist.");
+        }
+        if (!"submitted".equals(draft.getStatus())) {
+            throw new JeecgBootException("Only submitted Skill drafts can be reviewed.");
         }
         return draft;
     }

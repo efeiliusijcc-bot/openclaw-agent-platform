@@ -17,6 +17,8 @@ public interface IOpenclawSkillDraftService extends IService<OpenclawSkillDraft>
 
     OpenclawSkillDraft createFromSkill(String skillId);
 
+    OpenclawSkillDraft getDraftForAccess(String draftId);
+
     List<OpenclawSkillDraftFileNodeVO> fileTree(String draftId);
 
     OpenclawSkillDraftFileContentVO readFile(String draftId, String path);
@@ -32,4 +34,8 @@ public interface IOpenclawSkillDraftService extends IService<OpenclawSkillDraft>
     OpenclawSkillTestRun runTest(String draftId, OpenclawSkillDraftTestDTO dto);
 
     OpenclawSkillDraft submitForReview(String draftId);
+
+    OpenclawSkillDraft approveDraft(String draftId);
+
+    OpenclawSkillDraft rejectDraft(String draftId, String reason);
 }

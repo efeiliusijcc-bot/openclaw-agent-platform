@@ -73,6 +73,12 @@ public class OpenclawSkillDraftController {
         return Result.OK(draftService.createFromSkill(skillId));
     }
 
+    @GetMapping("/{id}")
+    @RequiresPermissions("openclaw:skill:draft:edit")
+    public Result<OpenclawSkillDraft> detail(@PathVariable String id) {
+        return Result.OK(draftService.getDraftForAccess(id));
+    }
+
     @GetMapping("/{id}/tree")
     @RequiresPermissions("openclaw:skill:draft:edit")
     public Result<List<OpenclawSkillDraftFileNodeVO>> tree(@PathVariable String id) {
@@ -123,6 +129,18 @@ public class OpenclawSkillDraftController {
         return Result.OK(draftService.submitForReview(id));
     }
 
+    @PostMapping("/{id}/approve")
+    @RequiresPermissions("openclaw:skill:review")
+    public Result<OpenclawSkillDraft> approve(@PathVariable String id) {
+        return Result.OK(draftService.approveDraft(id));
+    }
+
+    @PostMapping("/{id}/reject")
+    @RequiresPermissions("openclaw:skill:review")
+    public Result<OpenclawSkillDraft> reject(@PathVariable String id, @RequestParam String reason) {
+        return Result.OK(draftService.rejectDraft(id, reason));
+    }
+
     @GetMapping("/{id}/tests")
     @RequiresPermissions("openclaw:skill:draft:edit")
     public Result<IPage<OpenclawSkillTestRun>> testRuns(@PathVariable String id,
@@ -130,7 +148,9 @@ public class OpenclawSkillDraftController {
                                                         @RequestParam(name = "pageSize", defaultValue = "10") Integer pageSize) {
         OpenclawSkillDraft draft = draftService.getById(id);
         if (draft != null) {
-            permissionService.checkOwnerOrAdmin(draft.getOwnerUserId());
+            if (!permissionService.isSkillReviewer(permissionService.currentUser())) {
+                permissionService.checkOwnerOrAdmin(draft.getOwnerUserId());
+            }
         }
         QueryWrapper<OpenclawSkillTestRun> queryWrapper = new QueryWrapper<>();
         queryWrapper.eq("draft_id", id);

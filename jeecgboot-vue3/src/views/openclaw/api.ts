@@ -28,6 +28,7 @@ export const listSkillDrafts = (params) => defHttp.get({ url: '/openclaw/skill/d
 export const addSkillDraft = (params) => defHttp.post({ url: '/openclaw/skill/draft/add', params });
 export const createSkillDraftFromSkill = (skillId: string) =>
   defHttp.post({ url: '/openclaw/skill/draft/fromSkill', params: { skillId } }, { joinParamsToUrl: true });
+export const getSkillDraft = (id: string) => defHttp.get({ url: `/openclaw/skill/draft/${id}` });
 export const getSkillDraftTree = (id: string) => defHttp.get({ url: `/openclaw/skill/draft/${id}/tree` });
 export const readSkillDraftFile = (id: string, path: string) => defHttp.get({ url: `/openclaw/skill/draft/${id}/file`, params: { path } });
 export const saveSkillDraftFile = (id: string, params) => defHttp.post({ url: `/openclaw/skill/draft/${id}/file`, params });
@@ -38,6 +39,9 @@ export const lintSkillDraft = (id: string) => defHttp.post({ url: `/openclaw/ski
 export const runSkillDraftTest = (id: string, params) => defHttp.post({ url: `/openclaw/skill/draft/${id}/test`, params, timeout: 90 * 1000 });
 export const listSkillDraftTests = (id: string, params) => defHttp.get({ url: `/openclaw/skill/draft/${id}/tests`, params });
 export const submitSkillDraft = (id: string) => defHttp.post({ url: `/openclaw/skill/draft/${id}/submit` });
+export const approveSkillDraft = (id: string) => defHttp.post({ url: `/openclaw/skill/draft/${id}/approve` });
+export const rejectSkillDraft = (id: string, reason: string) =>
+  defHttp.post({ url: `/openclaw/skill/draft/${id}/reject`, params: { reason } }, { joinParamsToUrl: true });
 
 export const listRuns = (params) => defHttp.get({ url: '/openclaw/run/list', params });
 export const getRunDetail = (id: string) => defHttp.get({ url: `/openclaw/run/${id}` });

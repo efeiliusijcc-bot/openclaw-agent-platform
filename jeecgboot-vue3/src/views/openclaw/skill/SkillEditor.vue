@@ -4,19 +4,21 @@
       <a-space>
         <a-button preIcon="ant-design:arrow-left-outlined" @click="goBack">返回</a-button>
         <a-button preIcon="ant-design:reload-outlined" @click="loadTree">刷新</a-button>
-        <a-button type="primary" preIcon="ant-design:save-outlined" :disabled="!currentPath" @click="saveCurrentFile">保存</a-button>
-        <a-button preIcon="ant-design:check-circle-outlined" @click="runLint">Lint</a-button>
-        <a-button preIcon="ant-design:audit-outlined" @click="submitReview">Submit</a-button>
+        <a-button type="primary" preIcon="ant-design:save-outlined" :disabled="!currentPath || !canEdit" @click="saveCurrentFile">保存</a-button>
+        <a-button preIcon="ant-design:check-circle-outlined" :disabled="!canEdit" @click="runLint">Lint</a-button>
+        <a-button preIcon="ant-design:audit-outlined" :disabled="!canSubmit" @click="submitReview">Submit</a-button>
+        <a-button preIcon="ant-design:check-outlined" :disabled="!canReview" @click="approveReview">Approve</a-button>
+        <a-button danger preIcon="ant-design:close-outlined" :disabled="!canReview" @click="rejectReview">Reject</a-button>
       </a-space>
-      <div class="current-path">{{ currentPath || '请选择文件' }}</div>
+      <div class="current-path">{{ draft?.status || '-' }} / {{ currentPath || '请选择文件' }}</div>
     </div>
 
     <div class="editor-layout">
       <aside class="file-panel">
         <div class="panel-toolbar">
-          <a-button size="small" preIcon="ant-design:file-add-outlined" @click="openCreateFile(false)">文件</a-button>
-          <a-button size="small" preIcon="ant-design:folder-add-outlined" @click="openCreateFile(true)">目录</a-button>
-          <a-button size="small" danger preIcon="ant-design:delete-outlined" :disabled="!currentPath || currentPath === 'SKILL.md'" @click="deleteCurrentFile">
+          <a-button size="small" preIcon="ant-design:file-add-outlined" :disabled="!canEdit" @click="openCreateFile(false)">文件</a-button>
+          <a-button size="small" preIcon="ant-design:folder-add-outlined" :disabled="!canEdit" @click="openCreateFile(true)">目录</a-button>
+          <a-button size="small" danger preIcon="ant-design:delete-outlined" :disabled="!canEdit || !currentPath || currentPath === 'SKILL.md'" @click="deleteCurrentFile">
             删除
           </a-button>
         </div>
@@ -31,7 +33,7 @@
 
       <main class="code-panel">
         <div class="code-frame">
-          <CodeEditor v-model:value="content" :mode="editorMode" :readonly="!currentPath" />
+          <CodeEditor v-model:value="content" :mode="editorMode" :readonly="!currentPath || !canEdit" />
         </div>
       </main>
 
@@ -39,12 +41,12 @@
         <a-card size="small" title="测试运行" class="test-run-card">
           <a-form layout="vertical">
             <a-form-item label="测试 Prompt">
-              <a-textarea v-model:value="testPrompt" :rows="4" />
+              <a-textarea v-model:value="testPrompt" :rows="4" :disabled="!canEdit" />
             </a-form-item>
             <a-form-item label="期望输出">
-              <a-textarea v-model:value="expectedOutput" :rows="2" />
+              <a-textarea v-model:value="expectedOutput" :rows="2" :disabled="!canEdit" />
             </a-form-item>
-            <a-button type="primary" block preIcon="ant-design:play-circle-outlined" :loading="testing" @click="runTest">运行测试</a-button>
+            <a-button type="primary" block preIcon="ant-design:play-circle-outlined" :loading="testing" :disabled="!canEdit" @click="runTest">运行测试</a-button>
           </a-form>
           <a-divider />
           <div class="test-history">
@@ -86,18 +88,21 @@
 </template>
 
 <script lang="ts" setup name="OpenclawSkillEditor">
-  import { computed, onMounted, ref } from 'vue';
-  import { Modal } from 'ant-design-vue';
+  import { computed, h, onMounted, ref } from 'vue';
+  import { Input, Modal } from 'ant-design-vue';
   import { useRoute, useRouter } from 'vue-router';
   import { CodeEditor } from '/@/components/CodeEditor';
   import { useMessage } from '/@/hooks/web/useMessage';
   import {
+    approveSkillDraft,
     createSkillDraftFile,
     deleteSkillDraftFile,
+    getSkillDraft,
     getSkillDraftTree,
     lintSkillDraft,
     listSkillDraftTests,
     readSkillDraftFile,
+    rejectSkillDraft,
     runSkillDraftTest,
     saveSkillDraftFile,
     submitSkillDraft,
@@ -107,6 +112,7 @@
   const router = useRouter();
   const { createMessage } = useMessage();
   const draftId = computed(() => String(route.params.id || ''));
+  const draft = ref<any>(null);
   const treeData = ref<any[]>([]);
   const currentPath = ref('');
   const content = ref('');
@@ -127,11 +133,26 @@
     return 'text/plain';
   });
   const hasLintMessages = computed(() => (lintResult.value?.errors?.length || 0) > 0 || (lintResult.value?.warnings?.length || 0) > 0);
+  const canEdit = computed(() => ['editing', 'lint_failed', 'lint_passed', 'test_failed', 'rejected'].includes(draft.value?.status));
+  const canReview = computed(() => draft.value?.status === 'submitted');
+  const canSubmit = computed(() => canEdit.value && draft.value?.lastTestStatus === 'success');
 
   onMounted(async () => {
+    await loadDraft();
     await loadTree();
     await loadTestRuns();
   });
+
+  async function loadDraft() {
+    draft.value = await getSkillDraft(draftId.value);
+    if (draft.value?.lastLintResultJson) {
+      try {
+        lintResult.value = JSON.parse(draft.value.lastLintResultJson);
+      } catch {
+        lintResult.value = null;
+      }
+    }
+  }
 
   async function loadTree() {
     const nodes = await getSkillDraftTree(draftId.value);
@@ -156,19 +177,22 @@
   }
 
   async function saveCurrentFile() {
-    if (!currentPath.value) return;
+    if (!currentPath.value || !canEdit.value) return;
     await saveSkillDraftFile(draftId.value, { path: currentPath.value, content: content.value });
     createMessage.success('已保存');
     await loadTree();
+    await loadDraft();
   }
 
   function openCreateFile(directory: boolean) {
+    if (!canEdit.value) return;
     createDirectory.value = directory;
     newPath.value = '';
     createVisible.value = true;
   }
 
   async function submitCreateFile() {
+    if (!canEdit.value) return;
     if (!newPath.value) {
       createMessage.warning('请填写相对路径');
       return;
@@ -179,7 +203,7 @@
   }
 
   function deleteCurrentFile() {
-    if (!currentPath.value || currentPath.value === 'SKILL.md') return;
+    if (!canEdit.value || !currentPath.value || currentPath.value === 'SKILL.md') return;
     Modal.confirm({
       title: `确认删除 ${currentPath.value}?`,
       onOk: async () => {
@@ -192,11 +216,14 @@
   }
 
   async function runLint() {
+    if (!canEdit.value) return;
     lintResult.value = await lintSkillDraft(draftId.value);
     createMessage[lintResult.value.passed ? 'success' : 'warning'](lintResult.value.status);
+    await loadDraft();
   }
 
   async function runTest() {
+    if (!canEdit.value) return;
     if (!testPrompt.value) {
       createMessage.warning('请填写测试 Prompt');
       return;
@@ -205,6 +232,7 @@
     try {
       const result = await runSkillDraftTest(draftId.value, { prompt: testPrompt.value, expectedOutput: expectedOutput.value });
       createMessage[result.status === 'success' ? 'success' : 'warning'](`测试 ${result.status}`);
+      await loadDraft();
       await loadTestRuns();
     } finally {
       testing.value = false;
@@ -212,12 +240,46 @@
   }
 
   function submitReview() {
+    if (!canSubmit.value) return;
     Modal.confirm({
       title: 'Submit this draft for review?',
       onOk: async () => {
         await submitSkillDraft(draftId.value);
         createMessage.success('Submitted for review');
         goBack();
+      },
+    });
+  }
+
+  function approveReview() {
+    if (!canReview.value) return;
+    Modal.confirm({
+      title: 'Approve this draft?',
+      onOk: async () => {
+        await approveSkillDraft(draftId.value);
+        createMessage.success('Approved');
+        await loadDraft();
+      },
+    });
+  }
+
+  function rejectReview() {
+    if (!canReview.value) return;
+    let reason = '';
+    Modal.confirm({
+      title: 'Reject this draft?',
+      content: h(Input.TextArea, {
+        rows: 3,
+        placeholder: 'Reject reason',
+        onChange: (event: Event) => {
+          reason = (event.target as HTMLTextAreaElement).value;
+        },
+      }),
+      okText: 'Reject',
+      onOk: async () => {
+        await rejectSkillDraft(draftId.value, reason);
+        createMessage.warning('Rejected');
+        await loadDraft();
       },
     });
   }

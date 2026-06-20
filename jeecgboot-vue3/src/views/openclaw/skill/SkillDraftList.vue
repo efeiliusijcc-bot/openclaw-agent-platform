@@ -41,12 +41,20 @@
 </template>
 
 <script lang="ts" setup name="OpenclawSkillDraftList">
-  import { reactive, ref } from 'vue';
-  import { Modal } from 'ant-design-vue';
+  import { h, reactive, ref } from 'vue';
+  import { Input, Modal } from 'ant-design-vue';
   import { useRouter } from 'vue-router';
   import { BasicTable, TableAction, useTable } from '/@/components/Table';
   import { useMessage } from '/@/hooks/web/useMessage';
-  import { addSkillDraft, createSkillDraftFromSkill, lintSkillDraft, listSkillDrafts, submitSkillDraft } from '../api';
+  import {
+    addSkillDraft,
+    approveSkillDraft,
+    createSkillDraftFromSkill,
+    lintSkillDraft,
+    listSkillDrafts,
+    rejectSkillDraft,
+    submitSkillDraft,
+  } from '../api';
   import { commonTimeColumns, keywordSearch } from '../common';
 
   const router = useRouter();
@@ -73,7 +81,7 @@
       ...commonTimeColumns,
     ],
     formConfig: { labelWidth: 90, schemas: keywordSearch('draftName', '草稿名称') },
-    actionColumn: { width: 230, fixed: 'right' },
+    actionColumn: { width: 320, fixed: 'right' },
   });
 
   function statusColor(status) {
@@ -84,6 +92,8 @@
       test_passed: 'green',
       test_failed: 'red',
       submitted: 'orange',
+      approved: 'green',
+      rejected: 'red',
       published: 'purple',
     }[status] || 'default';
   }
@@ -152,11 +162,48 @@
     });
   }
 
+  function canReview(record) {
+    return record.status === 'submitted';
+  }
+
+  function approveReview(record) {
+    Modal.confirm({
+      title: `Approve ${record.draftName}?`,
+      onOk: async () => {
+        await approveSkillDraft(record.id);
+        createMessage.success('Approved');
+        reload();
+      },
+    });
+  }
+
+  function rejectReview(record) {
+    let reason = '';
+    Modal.confirm({
+      title: `Reject ${record.draftName}?`,
+      content: h(Input.TextArea, {
+        rows: 3,
+        placeholder: 'Reject reason',
+        onChange: (event: Event) => {
+          reason = (event.target as HTMLTextAreaElement).value;
+        },
+      }),
+      okText: 'Reject',
+      onOk: async () => {
+        await rejectSkillDraft(record.id, reason);
+        createMessage.warning('Rejected');
+        reload();
+      },
+    });
+  }
+
   function actions(record) {
     return [
       { label: '编辑', auth: 'openclaw:skill:draft:edit', onClick: () => openEditor(record) },
-      { label: 'Lint', auth: 'openclaw:skill:draft:lint', onClick: () => runLint(record) },
+      { label: 'Lint', auth: 'openclaw:skill:draft:lint', ifShow: !['submitted', 'approved', 'published'].includes(record.status), onClick: () => runLint(record) },
       { label: 'Submit', auth: 'openclaw:skill:draft:submit', ifShow: canSubmit(record), onClick: () => submitReview(record) },
+      { label: 'Approve', auth: 'openclaw:skill:review', ifShow: canReview(record), onClick: () => approveReview(record) },
+      { label: 'Reject', auth: 'openclaw:skill:review', ifShow: canReview(record), onClick: () => rejectReview(record) },
     ];
   }
 </script>
