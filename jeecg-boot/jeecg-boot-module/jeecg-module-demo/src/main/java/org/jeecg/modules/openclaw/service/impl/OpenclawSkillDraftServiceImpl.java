@@ -9,15 +9,18 @@ import org.jeecg.common.system.vo.LoginUser;
 import org.jeecg.modules.openclaw.constant.OpenclawConstants;
 import org.jeecg.modules.openclaw.dto.OpenclawSkillDraftCreateDTO;
 import org.jeecg.modules.openclaw.dto.OpenclawSkillDraftFileDTO;
+import org.jeecg.modules.openclaw.dto.OpenclawSkillDraftTestDTO;
 import org.jeecg.modules.openclaw.entity.OpenclawSkill;
 import org.jeecg.modules.openclaw.entity.OpenclawSkillDraft;
 import org.jeecg.modules.openclaw.entity.OpenclawSkillDraftFile;
+import org.jeecg.modules.openclaw.entity.OpenclawSkillTestRun;
 import org.jeecg.modules.openclaw.mapper.OpenclawSkillDraftFileMapper;
 import org.jeecg.modules.openclaw.mapper.OpenclawSkillDraftMapper;
 import org.jeecg.modules.openclaw.service.IOpenclawAuditLogService;
 import org.jeecg.modules.openclaw.service.IOpenclawPermissionService;
 import org.jeecg.modules.openclaw.service.IOpenclawSkillDraftService;
 import org.jeecg.modules.openclaw.service.IOpenclawSkillService;
+import org.jeecg.modules.openclaw.service.IOpenclawSkillTestRunService;
 import org.jeecg.modules.openclaw.vo.OpenclawSkillDraftFileContentVO;
 import org.jeecg.modules.openclaw.vo.OpenclawSkillDraftFileNodeVO;
 import org.jeecg.modules.openclaw.vo.OpenclawSkillDraftLintVO;
@@ -38,6 +41,7 @@ import java.security.DigestInputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Comparator;
+import java.util.Date;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -46,6 +50,7 @@ import java.util.Set;
 @Service
 public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraftMapper, OpenclawSkillDraft> implements IOpenclawSkillDraftService {
     private static final String DRAFT_ROOT = "/data/openclaw-platform/skill-drafts";
+    private static final String TEST_WORKSPACE_ROOT = "/data/openclaw-platform/skill-test-workspaces";
     private static final Set<String> EDITABLE_STATUSES = Set.of("editing", "lint_failed", "lint_passed", "test_failed", "rejected");
     private static final Set<String> DANGEROUS_CODE_KEYWORDS = Set.of(
         "os.system", "subprocess", "rm -rf", "curl ", "wget ", "chmod", "sudo", "eval(", "exec(", "socket", "requests", "open('/etc"
@@ -61,6 +66,8 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
     private OpenclawPathSafetyService pathSafetyService;
     @Autowired
     private IOpenclawAuditLogService auditLogService;
+    @Autowired
+    private IOpenclawSkillTestRunService testRunService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -285,6 +292,60 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
         }
     }
 
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public OpenclawSkillTestRun runTest(String draftId, OpenclawSkillDraftTestDTO dto) {
+        if (dto == null || !StringUtils.hasText(dto.getPrompt())) {
+            throw new JeecgBootException("Test prompt is required.");
+        }
+        OpenclawSkillDraft draft = requireDraft(draftId, false);
+        LoginUser user = permissionService.currentUser();
+        Date start = new Date();
+        OpenclawSkillTestRun run = new OpenclawSkillTestRun();
+        run.setDraftId(draft.getId());
+        run.setSkillSlug(draft.getSkillSlug());
+        run.setUserId(user.getId());
+        run.setUsername(user.getUsername());
+        run.setStatus(OpenclawConstants.RUN_STATUS_RUNNING);
+        run.setPrompt(trim(dto.getPrompt(), 8000));
+        run.setExpectedOutput(trim(dto.getExpectedOutput(), 4000));
+        run.setStartTime(start);
+        run.setDelFlag(OpenclawConstants.DEL_FLAG_NORMAL);
+        testRunService.save(run);
+        auditLogService.log("skill_draft_test_start", "skill_test_run", run.getId(), run);
+
+        try {
+            OpenclawSkillDraftLintVO lint = lint(draftId);
+            if (!Boolean.TRUE.equals(lint.getPassed())) {
+                finishTestRun(run, start, OpenclawConstants.RUN_STATUS_FAILED, "Lint failed before test run.", JSON.toJSONString(lint), null);
+                draft.setLastTestStatus(OpenclawConstants.RUN_STATUS_FAILED);
+                draft.setLastTestRunId(run.getId());
+                updateById(draft);
+                auditLogService.logFailure("skill_draft_test_failed", "skill_test_run", run.getId(), run);
+                return run;
+            }
+
+            Path workspace = materializeTestWorkspace(draft);
+            String output = "Test workspace prepared at " + workspace
+                + ". Prompt saved for manual OpenClaw execution. Full Agent Run integration is the next phase.";
+            finishTestRun(run, start, OpenclawConstants.RUN_STATUS_SUCCESS, output, null, workspace.toString());
+            draft.setStatus("test_passed");
+            draft.setLastTestStatus(OpenclawConstants.RUN_STATUS_SUCCESS);
+            draft.setLastTestRunId(run.getId());
+            updateById(draft);
+            auditLogService.logSuccess("skill_draft_test_success", "skill_test_run", run.getId(), run);
+            return run;
+        } catch (Exception e) {
+            finishTestRun(run, start, OpenclawConstants.RUN_STATUS_FAILED, null, e.getMessage(), null);
+            draft.setStatus("test_failed");
+            draft.setLastTestStatus(OpenclawConstants.RUN_STATUS_FAILED);
+            draft.setLastTestRunId(run.getId());
+            updateById(draft);
+            auditLogService.logFailure("skill_draft_test_failed", "skill_test_run", run.getId(), run);
+            return run;
+        }
+    }
+
     private OpenclawSkillDraft requireDraft(String draftId, boolean editable) {
         OpenclawSkillDraft draft = getById(draftId);
         if (draft == null || Integer.valueOf(OpenclawConstants.DEL_FLAG_DELETED).equals(draft.getDelFlag())) {
@@ -494,6 +555,36 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
                 }
             }
         }
+    }
+
+    private Path materializeTestWorkspace(OpenclawSkillDraft draft) throws IOException {
+        Path workspaceRoot = Paths.get(TEST_WORKSPACE_ROOT, "skill-draft-" + draft.getId()).toAbsolutePath().normalize();
+        Path root = Paths.get(TEST_WORKSPACE_ROOT).toAbsolutePath().normalize();
+        if (!workspaceRoot.startsWith(root)) {
+            throw new JeecgBootException("Invalid test workspace path.");
+        }
+        cleanupQuietly(workspaceRoot);
+        Files.createDirectories(workspaceRoot.resolve("skills"));
+        Path skillTarget = workspaceRoot.resolve("skills").resolve(draft.getSkillSlug()).normalize();
+        pathSafetyService.rejectIfOutsideRoot(workspaceRoot, skillTarget);
+        copyDirectory(draftRoot(draft), skillTarget);
+        Files.writeString(workspaceRoot.resolve("AGENTS.md"),
+            "# Skill Draft Test Agent\n\nUse the Skill under `skills/" + draft.getSkillSlug() + "` for this isolated test workspace.\n",
+            StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+        Files.writeString(workspaceRoot.resolve("USER.md"), "Skill draft owner: " + draft.getOwnerUsername() + "\n", StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+        Files.writeString(workspaceRoot.resolve("IDENTITY.md"), "Temporary Skill Draft test workspace.\n", StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+        return workspaceRoot;
+    }
+
+    private void finishTestRun(OpenclawSkillTestRun run, Date start, String status, String output, String error, String workspacePath) {
+        Date finish = new Date();
+        run.setStatus(status);
+        run.setOutputSummary(trim(output, 4000));
+        run.setErrorMessage(trim(error, 4000));
+        run.setWorkspacePath(workspacePath);
+        run.setFinishTime(finish);
+        run.setDurationMs(finish.getTime() - start.getTime());
+        testRunService.updateById(run);
     }
 
     private void cleanupQuietly(Path path) {

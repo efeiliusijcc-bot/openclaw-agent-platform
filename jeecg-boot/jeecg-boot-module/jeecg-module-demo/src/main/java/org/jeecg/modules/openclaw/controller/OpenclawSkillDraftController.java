@@ -11,9 +11,12 @@ import org.jeecg.common.system.query.QueryGenerator;
 import org.jeecg.modules.openclaw.constant.OpenclawConstants;
 import org.jeecg.modules.openclaw.dto.OpenclawSkillDraftCreateDTO;
 import org.jeecg.modules.openclaw.dto.OpenclawSkillDraftFileDTO;
+import org.jeecg.modules.openclaw.dto.OpenclawSkillDraftTestDTO;
 import org.jeecg.modules.openclaw.entity.OpenclawSkillDraft;
+import org.jeecg.modules.openclaw.entity.OpenclawSkillTestRun;
 import org.jeecg.modules.openclaw.service.IOpenclawPermissionService;
 import org.jeecg.modules.openclaw.service.IOpenclawSkillDraftService;
+import org.jeecg.modules.openclaw.service.IOpenclawSkillTestRunService;
 import org.jeecg.modules.openclaw.vo.OpenclawSkillDraftFileContentVO;
 import org.jeecg.modules.openclaw.vo.OpenclawSkillDraftFileNodeVO;
 import org.jeecg.modules.openclaw.vo.OpenclawSkillDraftLintVO;
@@ -37,6 +40,8 @@ public class OpenclawSkillDraftController {
     private IOpenclawSkillDraftService draftService;
     @Autowired
     private IOpenclawPermissionService permissionService;
+    @Autowired
+    private IOpenclawSkillTestRunService testRunService;
 
     @GetMapping("/list")
     @RequiresPermissions("openclaw:skill:draft:list")
@@ -104,5 +109,27 @@ public class OpenclawSkillDraftController {
     @RequiresPermissions("openclaw:skill:draft:lint")
     public Result<OpenclawSkillDraftLintVO> lint(@PathVariable String id) {
         return Result.OK(draftService.lint(id));
+    }
+
+    @PostMapping("/{id}/test")
+    @RequiresPermissions("openclaw:skill:draft:test")
+    public Result<OpenclawSkillTestRun> runTest(@PathVariable String id, @RequestBody OpenclawSkillDraftTestDTO dto) {
+        return Result.OK(draftService.runTest(id, dto));
+    }
+
+    @GetMapping("/{id}/tests")
+    @RequiresPermissions("openclaw:skill:draft:edit")
+    public Result<IPage<OpenclawSkillTestRun>> testRuns(@PathVariable String id,
+                                                        @RequestParam(name = "pageNo", defaultValue = "1") Integer pageNo,
+                                                        @RequestParam(name = "pageSize", defaultValue = "10") Integer pageSize) {
+        OpenclawSkillDraft draft = draftService.getById(id);
+        if (draft != null) {
+            permissionService.checkOwnerOrAdmin(draft.getOwnerUserId());
+        }
+        QueryWrapper<OpenclawSkillTestRun> queryWrapper = new QueryWrapper<>();
+        queryWrapper.eq("draft_id", id);
+        queryWrapper.eq("del_flag", OpenclawConstants.DEL_FLAG_NORMAL);
+        queryWrapper.orderByDesc("create_time");
+        return Result.OK(testRunService.page(new Page<>(pageNo, pageSize), queryWrapper));
     }
 }

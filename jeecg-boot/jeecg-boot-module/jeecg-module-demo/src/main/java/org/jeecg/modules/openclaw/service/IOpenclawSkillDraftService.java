@@ -3,7 +3,9 @@ package org.jeecg.modules.openclaw.service;
 import com.baomidou.mybatisplus.extension.service.IService;
 import org.jeecg.modules.openclaw.dto.OpenclawSkillDraftCreateDTO;
 import org.jeecg.modules.openclaw.dto.OpenclawSkillDraftFileDTO;
+import org.jeecg.modules.openclaw.dto.OpenclawSkillDraftTestDTO;
 import org.jeecg.modules.openclaw.entity.OpenclawSkillDraft;
+import org.jeecg.modules.openclaw.entity.OpenclawSkillTestRun;
 import org.jeecg.modules.openclaw.vo.OpenclawSkillDraftFileContentVO;
 import org.jeecg.modules.openclaw.vo.OpenclawSkillDraftFileNodeVO;
 import org.jeecg.modules.openclaw.vo.OpenclawSkillDraftLintVO;
@@ -26,4 +28,6 @@ public interface IOpenclawSkillDraftService extends IService<OpenclawSkillDraft>
     void deleteFile(String draftId, String path);
 
     OpenclawSkillDraftLintVO lint(String draftId);
+
+    OpenclawSkillTestRun runTest(String draftId, OpenclawSkillDraftTestDTO dto);
 }

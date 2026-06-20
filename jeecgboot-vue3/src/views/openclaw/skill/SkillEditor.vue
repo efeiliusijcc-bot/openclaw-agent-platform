@@ -35,6 +35,29 @@
       </main>
 
       <aside class="test-panel">
+        <a-card size="small" title="测试运行" class="test-run-card">
+          <a-form layout="vertical">
+            <a-form-item label="测试 Prompt">
+              <a-textarea v-model:value="testPrompt" :rows="4" />
+            </a-form-item>
+            <a-form-item label="期望输出">
+              <a-textarea v-model:value="expectedOutput" :rows="2" />
+            </a-form-item>
+            <a-button type="primary" block preIcon="ant-design:play-circle-outlined" :loading="testing" @click="runTest">运行测试</a-button>
+          </a-form>
+          <a-divider />
+          <div class="test-history">
+            <a-alert
+              v-for="item in testRuns"
+              :key="item.id"
+              :type="item.status === 'success' ? 'success' : 'error'"
+              :message="`${item.status} · ${item.durationMs || 0}ms`"
+              :description="item.outputSummary || item.errorMessage"
+              show-icon
+            />
+            <a-empty v-if="!testRuns.length" description="暂无测试记录" />
+          </div>
+        </a-card>
         <a-card size="small" title="Lint 结果">
           <a-descriptions :column="1" size="small" bordered>
             <a-descriptions-item label="状态">{{ lintResult?.status || '-' }}</a-descriptions-item>
@@ -72,7 +95,9 @@
     deleteSkillDraftFile,
     getSkillDraftTree,
     lintSkillDraft,
+    listSkillDraftTests,
     readSkillDraftFile,
+    runSkillDraftTest,
     saveSkillDraftFile,
   } from '../api';
 
@@ -84,6 +109,10 @@
   const currentPath = ref('');
   const content = ref('');
   const lintResult = ref<any>(null);
+  const testPrompt = ref('');
+  const expectedOutput = ref('');
+  const testing = ref(false);
+  const testRuns = ref<any[]>([]);
   const createVisible = ref(false);
   const createDirectory = ref(false);
   const newPath = ref('');
@@ -97,7 +126,10 @@
   });
   const hasLintMessages = computed(() => (lintResult.value?.errors?.length || 0) > 0 || (lintResult.value?.warnings?.length || 0) > 0);
 
-  onMounted(loadTree);
+  onMounted(async () => {
+    await loadTree();
+    await loadTestRuns();
+  });
 
   async function loadTree() {
     const nodes = await getSkillDraftTree(draftId.value);
@@ -160,6 +192,26 @@
   async function runLint() {
     lintResult.value = await lintSkillDraft(draftId.value);
     createMessage[lintResult.value.passed ? 'success' : 'warning'](lintResult.value.status);
+  }
+
+  async function runTest() {
+    if (!testPrompt.value) {
+      createMessage.warning('请填写测试 Prompt');
+      return;
+    }
+    testing.value = true;
+    try {
+      const result = await runSkillDraftTest(draftId.value, { prompt: testPrompt.value, expectedOutput: expectedOutput.value });
+      createMessage[result.status === 'success' ? 'success' : 'warning'](`测试 ${result.status}`);
+      await loadTestRuns();
+    } finally {
+      testing.value = false;
+    }
+  }
+
+  async function loadTestRuns() {
+    const result = await listSkillDraftTests(draftId.value, { pageNo: 1, pageSize: 5 });
+    testRuns.value = result?.records || [];
   }
 
   function goBack() {
@@ -225,6 +277,16 @@
   }
 
   .result-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .test-run-card {
+    margin-bottom: 12px;
+  }
+
+  .test-history {
     display: flex;
     flex-direction: column;
     gap: 8px;
