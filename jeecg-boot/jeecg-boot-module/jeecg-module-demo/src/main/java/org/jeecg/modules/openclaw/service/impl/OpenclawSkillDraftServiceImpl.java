@@ -10,6 +10,7 @@ import org.jeecg.common.exception.JeecgBootException;
 import org.jeecg.common.system.vo.LoginUser;
 import org.jeecg.modules.openclaw.constant.OpenclawConstants;
 import org.jeecg.modules.openclaw.dto.OpenclawAgentRunTestDTO;
+import org.jeecg.modules.openclaw.dto.OpenclawSkillDraftBatchTestDTO;
 import org.jeecg.modules.openclaw.dto.OpenclawSkillDraftCreateDTO;
 import org.jeecg.modules.openclaw.dto.OpenclawSkillDraftFileDTO;
 import org.jeecg.modules.openclaw.dto.OpenclawSkillDraftTestDTO;
@@ -442,6 +443,32 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
             auditLogService.logFailure("skill_draft_test_failed", "skill_test_run", run.getId(), run);
             return run;
         }
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public List<OpenclawSkillTestRun> runBatchTests(String draftId, OpenclawSkillDraftBatchTestDTO dto) {
+        if (dto == null || dto.getCases() == null || dto.getCases().isEmpty()) {
+            throw new JeecgBootException("At least one test case is required.");
+        }
+        if (dto.getCases().size() > 10) {
+            throw new JeecgBootException("Batch test supports at most 10 cases.");
+        }
+        List<OpenclawSkillTestRun> runs = new ArrayList<>();
+        int index = 1;
+        for (OpenclawSkillDraftBatchTestDTO.TestCase item : dto.getCases()) {
+            if (item == null || !StringUtils.hasText(item.getPrompt())) {
+                throw new JeecgBootException("Test case " + index + " prompt is required.");
+            }
+            OpenclawSkillDraftTestDTO testDTO = new OpenclawSkillDraftTestDTO();
+            String namePrefix = StringUtils.hasText(item.getName()) ? "[" + item.getName().trim() + "] " : "[Case " + index + "] ";
+            testDTO.setPrompt(namePrefix + item.getPrompt().trim());
+            testDTO.setExpectedOutput(item.getExpectedOutput());
+            runs.add(runTest(draftId, testDTO));
+            index++;
+        }
+        auditLogService.logSuccess("skill_draft_batch_test", "skill_draft", draftId, Map.of("count", runs.size()));
+        return runs;
     }
 
     @Override

@@ -9,6 +9,7 @@ import org.apache.shiro.authz.annotation.RequiresPermissions;
 import org.jeecg.common.api.vo.Result;
 import org.jeecg.common.system.query.QueryGenerator;
 import org.jeecg.modules.openclaw.constant.OpenclawConstants;
+import org.jeecg.modules.openclaw.dto.OpenclawSkillDraftBatchTestDTO;
 import org.jeecg.modules.openclaw.dto.OpenclawSkillDraftCreateDTO;
 import org.jeecg.modules.openclaw.dto.OpenclawSkillDraftFileDTO;
 import org.jeecg.modules.openclaw.dto.OpenclawSkillDraftTestDTO;
@@ -132,6 +133,12 @@ public class OpenclawSkillDraftController {
     @RequiresPermissions("openclaw:skill:draft:test")
     public Result<OpenclawSkillTestRun> runTest(@PathVariable String id, @RequestBody OpenclawSkillDraftTestDTO dto) {
         return Result.OK(draftService.runTest(id, dto));
+    }
+
+    @PostMapping("/{id}/tests/run")
+    @RequiresPermissions("openclaw:skill:draft:test")
+    public Result<List<OpenclawSkillTestRun>> runBatchTests(@PathVariable String id, @RequestBody OpenclawSkillDraftBatchTestDTO dto) {
+        return Result.OK(draftService.runBatchTests(id, dto));
     }
 
     @PostMapping("/{id}/repair")

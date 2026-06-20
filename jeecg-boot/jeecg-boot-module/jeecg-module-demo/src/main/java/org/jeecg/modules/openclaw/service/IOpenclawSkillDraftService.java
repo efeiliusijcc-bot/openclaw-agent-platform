@@ -1,6 +1,7 @@
 package org.jeecg.modules.openclaw.service;
 
 import com.baomidou.mybatisplus.extension.service.IService;
+import org.jeecg.modules.openclaw.dto.OpenclawSkillDraftBatchTestDTO;
 import org.jeecg.modules.openclaw.dto.OpenclawSkillDraftCreateDTO;
 import org.jeecg.modules.openclaw.dto.OpenclawSkillDraftFileDTO;
 import org.jeecg.modules.openclaw.dto.OpenclawSkillDraftTestDTO;
@@ -39,6 +40,8 @@ public interface IOpenclawSkillDraftService extends IService<OpenclawSkillDraft>
     OpenclawSkillDraftLintVO lint(String draftId);
 
     OpenclawSkillTestRun runTest(String draftId, OpenclawSkillDraftTestDTO dto);
+
+    List<OpenclawSkillTestRun> runBatchTests(String draftId, OpenclawSkillDraftBatchTestDTO dto);
 
     OpenclawSkillRepairVO repairDraft(String draftId, OpenclawSkillRepairDTO dto);
 

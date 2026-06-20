@@ -48,7 +48,10 @@
             <a-form-item label="期望输出">
               <a-textarea v-model:value="expectedOutput" :rows="2" :disabled="!canEdit" />
             </a-form-item>
-            <a-button type="primary" block preIcon="ant-design:play-circle-outlined" :loading="testing" :disabled="!canEdit" @click="runTest">运行测试</a-button>
+            <a-space direction="vertical" style="width: 100%">
+              <a-button type="primary" block preIcon="ant-design:play-circle-outlined" :loading="testing" :disabled="!canEdit" @click="runTest">运行测试</a-button>
+              <a-button block preIcon="ant-design:unordered-list-outlined" :loading="batchTesting" :disabled="!canEdit" @click="openBatchTest">Batch Test</a-button>
+            </a-space>
           </a-form>
           <a-divider />
           <div class="test-history">
@@ -98,6 +101,14 @@
       </a-button>
     </a-modal>
 
+    <a-modal v-model:open="batchVisible" title="Batch Test Cases" :confirmLoading="batchTesting" @ok="runBatchTest" destroyOnClose>
+      <a-form layout="vertical">
+        <a-form-item label="Prompts" required>
+          <a-textarea v-model:value="batchPromptText" :rows="8" placeholder="One prompt per line. Up to 10 prompts." />
+        </a-form-item>
+      </a-form>
+    </a-modal>
+
     <a-modal v-model:open="createVisible" :title="createDirectory ? '新建目录' : '新建文件'" @ok="submitCreateFile" destroyOnClose>
       <a-form layout="vertical">
         <a-form-item label="相对路径" required>
@@ -127,6 +138,7 @@
     readSkillDraftFile,
     rejectSkillDraft,
     repairSkillDraft,
+    runSkillDraftBatchTests,
     runSkillDraftTest,
     saveSkillDraftFile,
     submitSkillDraft,
@@ -144,6 +156,9 @@
   const testPrompt = ref('');
   const expectedOutput = ref('');
   const testing = ref(false);
+  const batchTesting = ref(false);
+  const batchVisible = ref(false);
+  const batchPromptText = ref('');
   const repairing = ref(false);
   const applyingRepair = ref(false);
   const repairVisible = ref(false);
@@ -265,6 +280,41 @@
       await loadTestRuns();
     } finally {
       testing.value = false;
+    }
+  }
+
+  function openBatchTest() {
+    if (!canEdit.value) return;
+    batchPromptText.value = '';
+    batchVisible.value = true;
+  }
+
+  async function runBatchTest() {
+    if (!canEdit.value) return;
+    const prompts = batchPromptText.value
+      .split(/\r?\n/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+    if (!prompts.length) {
+      createMessage.warning('Please enter at least one prompt');
+      return;
+    }
+    if (prompts.length > 10) {
+      createMessage.warning('Batch test supports at most 10 prompts');
+      return;
+    }
+    batchTesting.value = true;
+    try {
+      const runs = await runSkillDraftBatchTests(draftId.value, {
+        cases: prompts.map((prompt, index) => ({ name: `Case ${index + 1}`, prompt })),
+      });
+      const failed = (runs || []).filter((item) => item.status !== 'success').length;
+      createMessage[failed ? 'warning' : 'success'](`Batch test finished: ${prompts.length - failed}/${prompts.length} passed`);
+      batchVisible.value = false;
+      await loadDraft();
+      await loadTestRuns();
+    } finally {
+      batchTesting.value = false;
     }
   }
 
