@@ -130,7 +130,7 @@ No file, network, credential, database, or shell access is required.
 """
     files = {
         "SKILL.md": skill_md,
-        "main.py": 'def run(input_text: str) -> str:\n    marker = "ECHO_TEXT:"\n    if marker in input_text:\n        return input_text.split(marker, 1)[1].strip()\n    return input_text\n',
+        "main.py": 'def run(input_text: str) -> str:\n    marker = "ECHO_TEXT:"\n    if marker in input_text:\n        return input_text.split(marker, 1)[1].strip().splitlines()[0].strip()\n    return input_text.strip().splitlines()[0].strip()\n',
         "requirements.txt": "# no dependencies\n",
         "README.md": "# Codex Echo Skill\n\nMinimal echo skill for draft runtime acceptance.\n",
         "examples/test_prompt.md": "ECHO_TEXT: ECHO_OK\n",
