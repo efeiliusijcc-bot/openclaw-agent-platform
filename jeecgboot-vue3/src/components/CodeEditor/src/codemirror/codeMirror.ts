@@ -8,6 +8,9 @@ import 'codemirror/theme/material-palenight.css';
 import 'codemirror/mode/javascript/javascript';
 import 'codemirror/mode/css/css';
 import 'codemirror/mode/htmlmixed/htmlmixed';
+import 'codemirror/mode/markdown/markdown';
+import 'codemirror/mode/python/python';
+import 'codemirror/mode/yaml/yaml';
 // addons
 // import 'codemirror/addon/edit/closebrackets';
 // import 'codemirror/addon/edit/closetag';
