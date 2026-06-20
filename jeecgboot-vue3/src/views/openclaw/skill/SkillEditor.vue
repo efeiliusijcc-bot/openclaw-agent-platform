@@ -6,6 +6,7 @@
         <a-button preIcon="ant-design:reload-outlined" @click="loadTree">刷新</a-button>
         <a-button type="primary" preIcon="ant-design:save-outlined" :disabled="!currentPath || !canEdit" @click="saveCurrentFile">保存</a-button>
         <a-button preIcon="ant-design:check-circle-outlined" :disabled="!canEdit" @click="runLint">Lint</a-button>
+        <a-button preIcon="ant-design:edit-outlined" :loading="repairing" :disabled="!canEdit" @click="openAiEdit">AI Edit</a-button>
         <a-button preIcon="ant-design:tool-outlined" :loading="repairing" :disabled="!canEdit" @click="runRepair">AI Repair</a-button>
         <a-button preIcon="ant-design:audit-outlined" :disabled="!canSubmit" @click="submitReview">Submit</a-button>
         <a-button preIcon="ant-design:check-outlined" :disabled="!canReview" @click="approveReview">Approve</a-button>
@@ -82,7 +83,19 @@
       </aside>
     </div>
 
-    <a-modal v-model:open="repairVisible" title="AI Repair Suggestions" width="920px" :footer="null" destroyOnClose>
+    <a-modal v-model:open="aiEditVisible" title="AI Edit Skill" :confirmLoading="repairing" @ok="runAiEdit" destroyOnClose>
+      <a-form layout="vertical">
+        <a-form-item label="Change Request" required>
+          <a-textarea
+            v-model:value="aiEditInstruction"
+            :rows="6"
+            placeholder="Describe how to change this Skill. Example: make it focus on invoice extraction and add a JSON output example."
+          />
+        </a-form-item>
+      </a-form>
+    </a-modal>
+
+    <a-modal v-model:open="repairVisible" :title="repairTitle" width="920px" :footer="null" destroyOnClose>
       <a-alert v-if="repairResult?.summary" :message="repairResult.summary" :type="repairResult.source === 'ai' ? 'success' : 'warning'" show-icon />
       <div v-if="repairResult?.warnings?.length" class="repair-warnings">
         <a-alert v-for="item in repairResult.warnings" :key="item" type="warning" :message="item" show-icon />
@@ -161,6 +174,9 @@
   const batchPromptText = ref('');
   const repairing = ref(false);
   const applyingRepair = ref(false);
+  const aiEditVisible = ref(false);
+  const aiEditInstruction = ref('');
+  const repairTitle = ref('AI Repair Suggestions');
   const repairVisible = ref(false);
   const repairResult = ref<any>(null);
   const testRuns = ref<any[]>([]);
@@ -318,6 +334,31 @@
     }
   }
 
+  function openAiEdit() {
+    if (!canEdit.value) return;
+    aiEditInstruction.value = '';
+    aiEditVisible.value = true;
+  }
+
+  async function runAiEdit() {
+    if (!canEdit.value) return;
+    if (!aiEditInstruction.value.trim()) {
+      createMessage.warning('Please describe the Skill change');
+      return;
+    }
+    repairing.value = true;
+    try {
+      repairResult.value = await repairSkillDraft(draftId.value, {
+        instruction: aiEditInstruction.value.trim(),
+      });
+      repairTitle.value = 'AI Edit Suggestions';
+      aiEditVisible.value = false;
+      repairVisible.value = true;
+    } finally {
+      repairing.value = false;
+    }
+  }
+
   async function runRepair() {
     if (!canEdit.value) return;
     repairing.value = true;
@@ -327,6 +368,7 @@
         testRunId: latestFailed?.id || draft.value?.lastTestRunId,
         instruction: 'Analyze the latest lint and test failure, then suggest the smallest safe Skill file changes.',
       });
+      repairTitle.value = 'AI Repair Suggestions';
       repairVisible.value = true;
     } finally {
       repairing.value = false;

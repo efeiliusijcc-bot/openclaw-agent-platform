@@ -1172,7 +1172,7 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
             body.put("model", skillAiModel.trim());
             body.put("temperature", 0.1);
             JSONArray messages = new JSONArray();
-            messages.add(message("system", "You repair OpenClaw Skill draft files. Return only strict JSON with fields summary, files, warnings. files is an array of {path, action, explanation, content}. Only suggest safe text file upserts. Preserve existing behavior unless needed to fix lint or test failures."));
+            messages.add(message("system", "You edit or repair OpenClaw Skill draft files from a natural-language instruction and optional test failure context. Return only strict JSON with fields summary, files, warnings. files is an array of {path, action, explanation, content}. Only suggest safe text file upserts. Preserve existing behavior unless the user instruction, lint result, or test failure requires a change."));
             messages.add(message("user", buildRepairPrompt(draft, run, files, dto)));
             body.put("messages", messages);
 
@@ -1207,7 +1207,7 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
         StringBuilder builder = new StringBuilder();
         builder.append("Draft: ").append(draft.getDraftName()).append(" / ").append(draft.getSkillSlug()).append('\n');
         builder.append("Status: ").append(draft.getStatus()).append('\n');
-        builder.append("User instruction: ").append(safeText(dto == null ? null : dto.getInstruction())).append("\n\n");
+        builder.append("Natural-language edit instruction: ").append(safeText(dto == null ? null : dto.getInstruction())).append("\n\n");
         if (run != null) {
             builder.append("Test run status: ").append(run.getStatus()).append('\n');
             builder.append("Prompt:\n").append(safeText(run.getPrompt())).append("\n\n");
@@ -1256,8 +1256,8 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
         result.setDraftId(draft.getId());
         result.setTestRunId(run == null ? null : run.getId());
         result.setSource("fallback");
-        result.setSummary("AI repair model is not configured or unavailable. Generated safe repair notes and lint-oriented suggestions.");
-        result.getWarnings().add("Review every suggested change before applying it, then rerun Lint and the failed test.");
+        result.setSummary("AI edit model is not configured or unavailable. Generated safe notes and lint-oriented suggestions.");
+        result.getWarnings().add("Review every suggested change before applying it, then rerun Lint and tests.");
         String skillMd = files.get("SKILL.md");
         if (StringUtils.hasText(skillMd)) {
             String improved = ensureSkillMdSections(skillMd, draft, run);
@@ -1266,7 +1266,7 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
             }
         }
         String notes = repairNotesContent(draft, run, dto);
-        addRepairSuggestion(result, files, "REPAIR_NOTES.md", "upsert", "Record failure context and manual follow-up checks for this repair round.", notes);
+        addRepairSuggestion(result, files, "EDIT_NOTES.md", "upsert", "Record the natural-language change request and manual follow-up checks for this edit round.", notes);
         return result;
     }
 
@@ -1295,7 +1295,7 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
 
     private String repairNotesContent(OpenclawSkillDraft draft, OpenclawSkillTestRun run, OpenclawSkillRepairDTO dto) {
         StringBuilder builder = new StringBuilder();
-        builder.append("# Repair Notes\n\n");
+        builder.append("# Edit Notes\n\n");
         builder.append("- Draft: ").append(safeText(draft.getDraftName())).append(" (`").append(safeText(draft.getSkillSlug())).append("`)\n");
         builder.append("- Status: ").append(safeText(draft.getStatus())).append("\n");
         if (run != null) {
@@ -1306,7 +1306,7 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
             builder.append("## Error Message\n\n").append(safeText(run.getErrorMessage())).append("\n\n");
         }
         if (dto != null && StringUtils.hasText(dto.getInstruction())) {
-            builder.append("## Repair Instruction\n\n").append(safeText(dto.getInstruction())).append("\n\n");
+            builder.append("## Natural-Language Instruction\n\n").append(safeText(dto.getInstruction())).append("\n\n");
         }
         builder.append("## Next Checks\n\n- Run Lint.\n- Rerun the failed test prompt.\n- Remove this note before publishing if it is not useful to reviewers.\n");
         return builder.toString();
