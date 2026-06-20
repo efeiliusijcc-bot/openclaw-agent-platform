@@ -17,29 +17,63 @@ HELPER = r'''
 // JeecgBoot OpenClaw Skill Draft temporary agent registry patch.
 import { createRequire as __jeecgCreateRequire } from "node:module";
 const __jeecgRequire = __jeecgCreateRequire(import.meta.url);
+function __jeecgDraftLog(event, data = {}) {
+	try {
+		console.error("[jeecg-draft-agent] " + JSON.stringify({ event, ...data }));
+	} catch {
+		console.error("[jeecg-draft-agent] " + event);
+	}
+}
 function __jeecgReadDraftAgentEntries() {
+	let registryPath = "";
 	try {
 		const fs = __jeecgRequire("node:fs");
 		const os = __jeecgRequire("node:os");
 		const path = __jeecgRequire("node:path");
-		const registryPath = process.env.OPENCLAW_GATEWAY_DRAFT_AGENT_REGISTRY_PATH || path.join(os.homedir(), ".openclaw", "draft-agents.json");
+		registryPath = process.env.OPENCLAW_GATEWAY_DRAFT_AGENT_REGISTRY_PATH || path.join(os.homedir(), ".openclaw", "draft-agents.json");
 		const raw = fs.readFileSync(registryPath, "utf8");
 		const root = JSON.parse(raw);
 		const now = Date.now();
 		const entries = Array.isArray(root?.agents) ? root.agents : [];
-		return entries.filter((entry) => {
-			if (!entry || typeof entry !== "object") return false;
-			if (typeof entry.id !== "string" || !entry.id.trim()) return false;
-			if (typeof entry.workspace !== "string" || !entry.workspace.trim()) return false;
-			if (typeof entry.expiresAt === "number" && entry.expiresAt <= now) return false;
-			return true;
-		}).map((entry) => ({
-			id: entry.id,
-			workspace: entry.workspace,
-			skills: Array.isArray(entry.skills) ? entry.skills : entry.skillSlug ? [entry.skillSlug] : [],
-			identity: entry.identity && typeof entry.identity === "object" ? entry.identity : { name: entry.id }
-		}));
-	} catch {
+		const active = [];
+		let expired = 0;
+		let invalid = 0;
+		for (const entry of entries) {
+			if (!entry || typeof entry !== "object" || typeof entry.id !== "string" || !entry.id.trim() || typeof entry.workspace !== "string" || !entry.workspace.trim()) {
+				invalid++;
+				continue;
+			}
+			const expiredByTtl = typeof entry.expiresAt === "number" && entry.expiresAt <= now;
+			if (expiredByTtl) {
+				expired++;
+				__jeecgDraftLog("expired", { draftAgentsPath: registryPath, agentKey: entry.id, draftId: entry.draftId ?? null, testRunId: entry.testRunId ?? null, expiresAt: entry.expiresAt, now });
+				continue;
+			}
+			const skills = Array.isArray(entry.skills) ? entry.skills : entry.skillSlug ? [entry.skillSlug] : [];
+			const skillPath = skills.length > 0 ? path.join(entry.workspace, "skills", skills[0]) : null;
+			__jeecgDraftLog("active", {
+				draftAgentsPath: registryPath,
+				agentKey: entry.id,
+				draftId: entry.draftId ?? null,
+				testRunId: entry.testRunId ?? null,
+				workspaceId: entry.workspaceId ?? null,
+				workspacePath: entry.workspace,
+				skillPath,
+				ttlExpired: false,
+				workspaceExists: fs.existsSync(entry.workspace),
+				skillPathExists: skillPath ? fs.existsSync(skillPath) : false
+			});
+			active.push({
+				id: entry.id,
+				workspace: entry.workspace,
+				skills,
+				identity: entry.identity && typeof entry.identity === "object" ? entry.identity : { name: entry.id }
+			});
+		}
+		__jeecgDraftLog("read", { draftAgentsPath: registryPath, total: entries.length, active: active.length, expired, invalid });
+		return active;
+	} catch (err) {
+		__jeecgDraftLog("read_failed", { draftAgentsPath: registryPath, message: err instanceof Error ? err.message : String(err) });
 		return [];
 	}
 }
@@ -56,6 +90,7 @@ function __jeecgMergeDraftAgents(cfg) {
 		mergedList.push({ ...entry, id });
 		existing.add(id);
 	}
+	__jeecgDraftLog("merge", { active: draftAgents.length, merged: mergedList.length - list.length, agentKeys: draftAgents.map((entry) => normalizeAgentId(entry.id)) });
 	return { ...cfg, agents: { ...agents, list: mergedList } };
 }
 '''
@@ -64,8 +99,12 @@ function __jeecgMergeDraftAgents(cfg) {
 def patch_file(name: str, replacements: list[tuple[str, str]]) -> None:
     path = DIST / name
     text = path.read_text(encoding="utf-8")
-    if "__jeecgMergeDraftAgents" not in text:
-        marker = "//#region "
+    marker = "//#region "
+    if "JeecgBoot OpenClaw Skill Draft temporary agent registry patch." in text:
+        start = text.index("// JeecgBoot OpenClaw Skill Draft temporary agent registry patch.")
+        end = text.index(marker, start)
+        text = text[:start] + HELPER + "\n" + text[end:]
+    elif "__jeecgMergeDraftAgents" not in text:
         index = text.index(marker)
         text = text[:index] + HELPER + "\n" + text[index:]
     for old, new in replacements:

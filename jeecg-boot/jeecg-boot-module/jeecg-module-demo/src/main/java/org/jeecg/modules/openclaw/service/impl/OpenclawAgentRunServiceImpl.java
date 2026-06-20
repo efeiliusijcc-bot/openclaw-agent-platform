@@ -5,6 +5,7 @@ import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import lombok.extern.slf4j.Slf4j;
 import org.jeecg.common.exception.JeecgBootException;
 import org.jeecg.common.system.vo.LoginUser;
 import org.jeecg.modules.openclaw.constant.OpenclawConstants;
@@ -51,6 +52,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 @Service
+@Slf4j
 public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMapper, OpenclawAgentRun> implements IOpenclawAgentRunService {
     private static final int MAX_PROMPT_LENGTH = 8000;
     private static final int MAX_SUMMARY_LENGTH = 12000;
@@ -158,7 +160,8 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
             checkRunQuotaForExecution(user, draftAgent, run.getId());
             markRunRunning(run, draftAgent);
             gatewayRunningTracked = true;
-            CliResult result = executeCli(draftAgent.getAgentKey(), prompt);
+            String sessionKey = "agent:" + draftAgent.getAgentKey() + ":draft-test-" + testRunId;
+            CliResult result = executeCli(draftAgent.getAgentKey(), prompt, sessionKey, testRunId);
             Date finishTime = new Date();
             run.setFinishTime(finishTime);
             run.setDurationMs(finishTime.getTime() - startTime.getTime());
@@ -295,7 +298,7 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
     }
 
     private String executeCliStreamCompat(OpenclawAgent agent, String prompt, SseEmitter emitter) throws Exception {
-        CliResult result = executeCli(agent.getAgentKey(), prompt);
+            CliResult result = executeCli(agent.getAgentKey(), prompt);
         ParsedOutput parsed = parseOutput(result.stdout);
         boolean timeout = OpenclawConstants.RUN_STATUS_TIMEOUT.equalsIgnoreCase(parsed.status);
         boolean success = result.exitCode == 0 && ("ok".equalsIgnoreCase(parsed.status) || !StringUtils.hasText(parsed.status));
@@ -769,11 +772,19 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
     }
 
     private CliResult executeCli(String agentKey, String prompt) throws Exception {
+        return executeCli(agentKey, prompt, null, null);
+    }
+
+    private CliResult executeCli(String agentKey, String prompt, String sessionKey, String testRunId) throws Exception {
         List<String> command = new ArrayList<>();
         command.add(StringUtils.hasText(openclawCliPath) ? openclawCliPath : "openclaw");
         command.add("agent");
         command.add("--agent");
         command.add(agentKey);
+        if (StringUtils.hasText(sessionKey)) {
+            command.add("--session-key");
+            command.add(sessionKey);
+        }
         command.add("--message");
         command.add(prompt);
         command.add("--json");
@@ -781,6 +792,8 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
         command.add(String.valueOf(timeoutSeconds()));
 
         ProcessBuilder builder = new ProcessBuilder(command);
+        log.info("openclaw cli run start agentKey={} testRunId={} sessionKey={} command={}",
+            agentKey, testRunId, sessionKey, safeCommand(command));
         Process process = builder.start();
         CompletableFuture<String> stdout = CompletableFuture.supplyAsync(() -> readStream(process.getInputStream()));
         CompletableFuture<String> stderr = CompletableFuture.supplyAsync(() -> readStream(process.getErrorStream()));
@@ -794,7 +807,26 @@ public class OpenclawAgentRunServiceImpl extends ServiceImpl<OpenclawAgentRunMap
         result.exitCode = process.exitValue();
         result.stdout = stdout.get(5, TimeUnit.SECONDS);
         result.stderr = stderr.get(5, TimeUnit.SECONDS);
+        log.info("openclaw cli run finish agentKey={} testRunId={} exitCode={} stdoutSummary={} stderrSummary={}",
+            agentKey, testRunId, result.exitCode, trim(result.stdout, 500), trim(result.stderr, 500));
         return result;
+    }
+
+    private List<String> safeCommand(List<String> command) {
+        List<String> safe = new ArrayList<>();
+        boolean redactNext = false;
+        for (String item : command) {
+            if (redactNext) {
+                safe.add("<redacted>");
+                redactNext = false;
+                continue;
+            }
+            safe.add(item);
+            if ("--message".equals(item)) {
+                redactNext = true;
+            }
+        }
+        return safe;
     }
 
     private long timeoutSeconds() {

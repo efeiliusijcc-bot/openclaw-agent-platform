@@ -6,6 +6,7 @@ import com.alibaba.fastjson.JSONObject;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.IdWorker;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import lombok.extern.slf4j.Slf4j;
 import org.jeecg.common.exception.JeecgBootException;
 import org.jeecg.common.system.vo.LoginUser;
 import org.jeecg.modules.openclaw.constant.OpenclawConstants;
@@ -78,6 +79,7 @@ import java.util.Set;
 import java.util.UUID;
 
 @Service
+@Slf4j
 public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraftMapper, OpenclawSkillDraft> implements IOpenclawSkillDraftService {
     private static final String DRAFT_ROOT = "/data/openclaw-platform/skill-drafts";
     private static final String TEST_WORKSPACE_ROOT = OpenclawConstants.WORKSPACE_ROOT + "/skill-draft-tests";
@@ -430,8 +432,9 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
             try {
                 agentRun = agentRunService.runDraftTest(context.agent, context.workspace, dto.getPrompt(), run.getId());
             } finally {
-                cleanupDraftAgent(context.agent.getAgentKey());
-                auditLogService.logSuccess("skill_draft_agent_cleanup", "skill_test_run", run.getId(), draftAgentAuditDetail(context, draft, run, user));
+                log.info("skill draft agent retained until ttl agentKey={} draftId={} testRunId={} workspaceId={} registryPath={}",
+                    context.agent.getAgentKey(), draft.getId(), run.getId(), context.workspace.getId(), draftAgentRegistryFile());
+                auditLogService.logSuccess("skill_draft_agent_retained_until_ttl", "skill_test_run", run.getId(), draftAgentAuditDetail(context, draft, run, user));
             }
             String status = StringUtils.hasText(agentRun.getStatus()) ? agentRun.getStatus() : OpenclawConstants.RUN_STATUS_FAILED;
             finishTestRun(run, start, status, agentRun.getOutputSummary(), agentRun.getErrorMessage(), context.workspace.getPath());
@@ -1540,7 +1543,9 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
         OpenclawGatewayNode gateway = requireOnlineGatewayForDraftTest();
         OpenclawAgent agent = buildDraftTestAgent(draft, workspace, gateway, run);
         workspaceMaterializer.materialize(agent, workspace);
-        materializeDraftSkill(draft, workspace, run);
+        Path skillPath = materializeDraftSkill(draft, workspace, run);
+        log.info("skill draft test prepared agentKey={} draftId={} testRunId={} workspaceId={} workspacePath={} skillPath={} gatewayId={}",
+            agent.getAgentKey(), draft.getId(), run.getId(), workspace.getId(), workspace.getPath(), skillPath, gateway.getId());
         TestAgentContext context = new TestAgentContext();
         context.workspace = workspace;
         context.agent = agent;
@@ -1594,7 +1599,7 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
         return agent;
     }
 
-    private void materializeDraftSkill(OpenclawSkillDraft draft, OpenclawWorkspace workspace, OpenclawSkillTestRun run) throws IOException {
+    private Path materializeDraftSkill(OpenclawSkillDraft draft, OpenclawWorkspace workspace, OpenclawSkillTestRun run) throws IOException {
         Path skillsRoot = workspaceMaterializer.safeWorkspacePath(workspace.getPath()).resolve("skills").normalize();
         Path target = skillsRoot.resolve(draft.getSkillSlug()).normalize();
         if (!target.startsWith(skillsRoot)) {
@@ -1616,6 +1621,7 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
                 Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING);
             }
             cleanupQuietly(backup);
+            return target;
         } catch (IOException e) {
             if (Files.exists(backup)) {
                 cleanupQuietly(target);
@@ -1670,6 +1676,9 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
             registry.put("agents", agents);
             writeDraftAgentRegistry(registry);
         }
+        log.info("skill draft agent registered agentKey={} draftId={} testRunId={} workspaceId={} registryPath={} workspacePath={} skillPath={} expiresAt={}",
+            context.agent.getAgentKey(), draft.getId(), run.getId(), context.workspace.getId(), draftAgentRegistryFile(),
+            context.workspace.getPath(), Paths.get(context.workspace.getPath()).resolve("skills").resolve(draft.getSkillSlug()).normalize(), now + ttlMillis);
     }
 
     private void cleanupDraftAgent(String agentKey) throws IOException {
@@ -1724,6 +1733,8 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
             }
             Long expiresAt = item.getLong("expiresAt");
             if (expiresAt != null && expiresAt <= now) {
+                log.info("skill draft agent registry ttl expired agentKey={} expiresAt={} now={} registryPath={}",
+                    item.getString("id"), expiresAt, now, draftAgentRegistryFile());
                 continue;
             }
             agents.add(item);
