@@ -1,5 +1,11 @@
 # Project Memory
 
+## 2026-06-21 - Skill Draft AI Edit Action Compatibility Fix
+
+- During the invoice AI Edit acceptance flow, `/openclaw/skill/draft/{id}/ai-edit/preview` failed when the model returned a file suggestion with `action: update`; the backend validator only allowed `upsert/delete` and returned `Unsupported AI edit action: update`.
+- Fixed `SkillAiEditValidator` to normalize common model synonyms before validation: `create/update/replace` -> `upsert`, `remove` -> `delete`. Unknown actions remain rejected, and path/content/delete safety rules are unchanged.
+- Required verification after deployment: Maven compile, invoice AI Edit preview/apply/readback/lint/test, and failed-test AI Repair smoke.
+
 ## 2026-06-21 - Skill Draft AI Edit/Test/Repair Acceptance
 
 ### Acceptance Flow

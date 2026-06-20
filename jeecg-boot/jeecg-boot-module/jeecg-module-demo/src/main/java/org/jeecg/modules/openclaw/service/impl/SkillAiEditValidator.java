@@ -61,6 +61,7 @@ public class SkillAiEditValidator {
         if (!ALLOWED_ACTIONS.contains(action)) {
             throw new JeecgBootException("Unsupported AI edit action: " + file.getAction());
         }
+        file.setAction(action);
         String path = file.getPath().replace('\\', '/').trim();
         validateAllowedPath(path);
         Path target = pathSafetyService.resolve(draftRoot, path);
@@ -91,6 +92,16 @@ public class SkillAiEditValidator {
     }
 
     private String normalizeAction(String action) {
-        return StringUtils.hasText(action) ? action.trim().toLowerCase(Locale.ROOT) : "upsert";
+        if (!StringUtils.hasText(action)) {
+            return "upsert";
+        }
+        String value = action.trim().toLowerCase(Locale.ROOT);
+        if ("create".equals(value) || "update".equals(value) || "replace".equals(value)) {
+            return "upsert";
+        }
+        if ("remove".equals(value)) {
+            return "delete";
+        }
+        return value;
     }
 }
