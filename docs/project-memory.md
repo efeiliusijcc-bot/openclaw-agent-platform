@@ -1,5 +1,35 @@
 # Project Memory
 
+## 2026-06-21 - Skill Draft AI Edit/Test/Repair Acceptance
+
+### Acceptance Flow
+
+- User-visible flow under test: open Skill draft editor, click AI Edit, enter `把这个 Skill 改成发票抽取 Skill`, display backend `summary/files/warnings`, apply suggestions, write draft files, run Lint, run Test, then use AI Repair when a test fails.
+- Frontend locations: `jeecgboot-vue3/src/views/openclaw/skill/SkillEditor.vue` and `jeecgboot-vue3/src/views/openclaw/api.ts`.
+- Existing UI supports AI Edit preview modal, result modal with `summary/files/warnings`, apply, Lint, Test, AI Repair, and test history refresh.
+
+### Runtime Fixes
+
+- After Draft Agents were visible to Gateway, test execution still failed because OpenClaw CLI defaulted to the built-in `openai/gpt-5.5`; this server provider accepts `openai/mimo-v2.5-pro`. Gateway returned `FailoverError: LLM request failed: provider rejected the request schema or tool payload`.
+- Fix: backend now supports `OPENCLAW_DRAFT_TEST_MODEL` / `openclaw.skill-draft.test-model`. Draft Test CLI execution passes `--model`, and the temporary draft-agent registry entry includes `model.primary`.
+- Gateway registry diagnostics were too noisy on stderr and polluted CLI failure text. `scripts/patch-openclaw-draft-agent-registry.py` now emits active/read/merge diagnostics only with `OPENCLAW_DRAFT_AGENT_DEBUG=1`; `read_failed` remains visible.
+
+### Mistakes Recorded
+
+- Do not push this repo to `origin` by habit: local `origin` points to upstream `https://github.com/jeecgboot/JeecgBoot.git` and returns 403. The writable remote is `openclaw-platform`.
+- After restarting `openclaw-jeecg-backend`, do not run acceptance immediately. JeecgBoot took about 52 seconds to reach `Tomcat started on port 8081`; verify with logs or `ss -ltnp` first.
+- Avoid sending indented Python through nested PowerShell -> SSH -> Bash heredocs. In this environment indentation was flattened and caused `IndentationError`; use `scp` for temporary scripts.
+
+### Deployment And Verification
+
+- Server build repo `/opt/openclaw-build/jeecgboot` is at commit `5b61a15b`.
+- Re-applied Gateway dist patch, rebuilt backend jar, copied it to `/opt/openclaw-jeecg/backend/app.jar`, restarted `openclaw-jeecg-backend` and `openclaw-gateway`.
+- Services are active, and only one system-level Gateway process remains.
+- Echo Draft acceptance passed: create draft, save files, Lint, Test, and expected `ECHO_OK_*` output all succeeded.
+- Invoice AI Edit acceptance passed: preview, apply, read back invoice content, Lint, Test, and test history succeeded.
+- AI Repair after failed test passed: inserting `rm -rf` into `main.py` made Test fail at lint; AI Repair returned a summary and file suggestion.
+- Gateway logs after 04:30 contained no `1006`, `FailoverError`, or `[jeecg-draft-agent]` diagnostic noise.
+
 ## 2026-06-21 - Skill Draft Test Temporary Agent Registry
 
 ### Context
