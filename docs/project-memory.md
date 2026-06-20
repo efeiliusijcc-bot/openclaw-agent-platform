@@ -80,3 +80,25 @@
 - AI 生成内容只允许进入草稿目录，不能直接修改生产 Skill。
 - 对 AI 返回的 action 不要静默纠正为安全值；应保留原值并由校验器拒绝非法 action。
 - 当前 `workspaceId` 在 AI Edit 记录中为 TODO，因为现有 Skill draft 实体没有 workspace 归属字段。
+
+## 2026-06-21 - AI Edit 发票抽取验收记录
+
+### 本次验收结论
+
+- 服务器 `116.204.135.83` 已部署后端提交 `401c1e98`。
+- Skill AI Edit 已接入 `/root/.openclaw/openclaw.json` 中的 OpenAI-compatible 模型配置，`mimo-v2.5-pro` 连通性测试返回 HTTP 200 且有 `choices`。
+- 端到端 API 验收通过：登录、创建临时草稿、AI Edit preview、展示所需字段、apply 写入草稿文件、读取 `SKILL.md`、Lint、Test、Test 失败后 AI Repair。
+- 验收草稿 `2068408661029535746` 的 AI Edit preview 返回 `source=ai`、`fileCount=5`、`warningCount=1`；apply 后 `SKILL.md` 包含发票/invoice 相关内容；Lint 通过。
+- Test 当前失败原因是 OpenClaw Gateway 不认识临时草稿 agent id：`unknown agent id "skill_draft_test_2068408661029535746"`。这触发了 AI Repair，AI Repair 返回 `source=ai`、`fileCount=3`、`warningCount=3`，说明失败后继续修复入口可用。
+
+### 本次发现并修复的问题
+
+1. 生产库仍缺少历史迁移字段 `openclaw_audit_log.result`，导致创建草稿时审计日志插入失败。原因仍是 prod 禁用 Flyway。已按 `V3.9.2_6__openclaw_audit_result.sql` 在 MySQL 手动补齐 `result` 字段和相关索引。
+2. `previewAiEdit` 审计日志使用 `Map.of(...)`，当无测试上下文时 `testRunId=null`，会触发 NPE。已改为 `LinkedHashMap`，仅在 `testRunId` 非空时写入；提交为 `401c1e98 fix(openclaw): allow ai edit preview without test run`。
+3. 服务器未配置 `OPENCLAW_SKILL_AI_BASE_URL`、`OPENCLAW_SKILL_AI_MODEL`、`OPENCLAW_SKILL_AI_API_KEY` 时，AI Edit 会走 `fallback`，只能返回安全说明和 lint 补全，不会真正把 Skill 改成“发票抽取”。已新增 systemd drop-in `skill-ai.conf`，从 OpenClaw 模型配置接入 Skill AI。
+
+### 后续注意
+
+- 验收自然语言改写质量时必须检查 `source=ai`；`source=fallback` 只能说明降级链路可用，不能证明模型改写能力可用。
+- 生产部署后不仅要检查新表，也要检查历史 OpenClaw 增量字段和索引，尤其是 prod 禁用 Flyway 的环境。
+- Skill Draft Test 目前依赖 Gateway 能识别临时草稿 agent id；若要让 Test 通过，需要补齐 Gateway 对 draft skill test agent 的注册/临时执行支持。
