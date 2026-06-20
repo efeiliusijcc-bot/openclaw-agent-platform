@@ -552,12 +552,14 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
             OpenclawSkillAiEditVO result = toAiEditVO(record, repair.getFiles(), repair.getWarnings());
             result.setTestRunId(repair.getTestRunId());
             result.setSource(repair.getSource());
-            auditLogService.logSuccess("skill_draft_ai_edit_preview", "skill_draft", draft.getId(), Map.of(
-                "recordId", record.getId(),
-                "testRunId", result.getTestRunId(),
-                "source", result.getSource(),
-                "fileCount", result.getFiles().size()
-            ));
+            Map<String, Object> auditDetail = new LinkedHashMap<>();
+            auditDetail.put("recordId", record.getId());
+            if (StringUtils.hasText(result.getTestRunId())) {
+                auditDetail.put("testRunId", result.getTestRunId());
+            }
+            auditDetail.put("source", result.getSource());
+            auditDetail.put("fileCount", result.getFiles().size());
+            auditLogService.logSuccess("skill_draft_ai_edit_preview", "skill_draft", draft.getId(), auditDetail);
             return result;
         } catch (IOException e) {
             throw new JeecgBootException("Analyze Skill AI edit failed: " + e.getMessage(), e);
