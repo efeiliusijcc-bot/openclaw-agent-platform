@@ -104,13 +104,20 @@
       <div v-for="file in repairResult?.files || []" :key="file.path" class="repair-file">
         <div class="repair-file-header">
           <strong>{{ file.action || 'upsert' }} {{ file.path }}</strong>
-          <a-button size="small" type="primary" :loading="applyingRepair" @click="applyRepairFile(file)">Apply</a-button>
+          <a-button v-if="!repairResult?.recordId" size="small" type="primary" :loading="applyingRepair" @click="applyRepairFile(file)">Apply</a-button>
         </div>
         <p v-if="file.explanation">{{ file.explanation }}</p>
-        <pre class="repair-diff">{{ file.diff || file.content }}</pre>
+        <a-tabs size="small">
+          <a-tab-pane key="diff" tab="Diff">
+            <pre class="repair-diff">{{ file.diff || 'No diff available.' }}</pre>
+          </a-tab-pane>
+          <a-tab-pane key="content" tab="New Content">
+            <pre class="repair-diff">{{ file.action === 'delete' ? '(delete file)' : file.content }}</pre>
+          </a-tab-pane>
+        </a-tabs>
       </div>
       <a-button v-if="repairResult?.files?.length" type="primary" block :loading="applyingRepair" @click="applyAllRepairs">
-        Apply All Suggestions
+        {{ repairResult?.recordId ? 'Confirm and Apply AI Edit' : 'Apply All Suggestions' }}
       </a-button>
     </a-modal>
 
@@ -140,6 +147,7 @@
   import { useMessage } from '/@/hooks/web/useMessage';
   import {
     approveSkillDraft,
+    applySkillDraftAiEdit,
     applySkillDraftRepair,
     createSkillDraftFile,
     deleteSkillDraftFile,
@@ -148,6 +156,7 @@
     lintSkillDraft,
     listSkillDraftTests,
     publishSkillDraft,
+    previewSkillDraftAiEdit,
     readSkillDraftFile,
     rejectSkillDraft,
     repairSkillDraft,
@@ -348,7 +357,7 @@
     }
     repairing.value = true;
     try {
-      repairResult.value = await repairSkillDraft(draftId.value, {
+      repairResult.value = await previewSkillDraftAiEdit(draftId.value, {
         instruction: aiEditInstruction.value.trim(),
       });
       repairTitle.value = 'AI Edit Suggestions';
@@ -385,6 +394,16 @@
 
   async function applyRepairs(files) {
     if (!files?.length) return;
+    if (repairResult.value?.recordId) {
+      Modal.confirm({
+        title: 'Apply this AI edit preview?',
+        content: 'This will write the suggested files into the current draft. Run Lint and tests after applying.',
+        onOk: async () => {
+          await applyAiEditPreview();
+        },
+      });
+      return;
+    }
     applyingRepair.value = true;
     try {
       await applySkillDraftRepair(draftId.value, {
@@ -397,6 +416,26 @@
         })),
       });
       createMessage.success('Repair applied');
+      repairVisible.value = false;
+      await loadDraft();
+      await loadTree();
+      await loadTestRuns();
+      if (currentPath.value) {
+        await onSelectFile([currentPath.value]);
+      }
+    } finally {
+      applyingRepair.value = false;
+    }
+  }
+
+  async function applyAiEditPreview() {
+    applyingRepair.value = true;
+    try {
+      await applySkillDraftAiEdit(draftId.value, {
+        recordId: repairResult.value.recordId,
+        reason: repairResult.value?.summary,
+      });
+      createMessage.success('AI edit applied. Please run Lint and tests next.');
       repairVisible.value = false;
       await loadDraft();
       await loadTree();

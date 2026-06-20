@@ -14,6 +14,8 @@ import org.jeecg.modules.openclaw.dto.OpenclawSkillDraftCreateDTO;
 import org.jeecg.modules.openclaw.dto.OpenclawSkillDraftFileDTO;
 import org.jeecg.modules.openclaw.dto.OpenclawSkillDraftTestDTO;
 import org.jeecg.modules.openclaw.dto.OpenclawSkillGenerateDTO;
+import org.jeecg.modules.openclaw.dto.OpenclawSkillAiEditApplyDTO;
+import org.jeecg.modules.openclaw.dto.OpenclawSkillAiEditPreviewDTO;
 import org.jeecg.modules.openclaw.dto.OpenclawSkillRepairApplyDTO;
 import org.jeecg.modules.openclaw.dto.OpenclawSkillRepairDTO;
 import org.jeecg.modules.openclaw.entity.OpenclawSkill;
@@ -25,6 +27,7 @@ import org.jeecg.modules.openclaw.service.IOpenclawSkillTestRunService;
 import org.jeecg.modules.openclaw.vo.OpenclawSkillDraftFileContentVO;
 import org.jeecg.modules.openclaw.vo.OpenclawSkillDraftFileNodeVO;
 import org.jeecg.modules.openclaw.vo.OpenclawSkillDraftLintVO;
+import org.jeecg.modules.openclaw.vo.OpenclawSkillAiEditVO;
 import org.jeecg.modules.openclaw.vo.OpenclawSkillRepairVO;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -151,6 +154,18 @@ public class OpenclawSkillDraftController {
     @RequiresPermissions("openclaw:skill:draft:edit")
     public Result<OpenclawSkillRepairVO> applyRepair(@PathVariable String id, @RequestBody OpenclawSkillRepairApplyDTO dto) {
         return Result.OK(draftService.applyRepair(id, dto));
+    }
+
+    @PostMapping("/{id}/ai-edit/preview")
+    @RequiresPermissions("openclaw:skill:draft:edit")
+    public Result<OpenclawSkillAiEditVO> previewAiEdit(@PathVariable String id, @RequestBody OpenclawSkillAiEditPreviewDTO dto) {
+        return Result.OK(draftService.previewAiEdit(id, dto));
+    }
+
+    @PostMapping("/{id}/ai-edit/apply")
+    @RequiresPermissions("openclaw:skill:draft:edit")
+    public Result<OpenclawSkillAiEditVO> applyAiEdit(@PathVariable String id, @RequestBody OpenclawSkillAiEditApplyDTO dto) {
+        return Result.OK(draftService.applyAiEdit(id, dto));
     }
 
     @PostMapping("/{id}/submit")

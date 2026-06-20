@@ -42,6 +42,9 @@ export const runSkillDraftBatchTests = (id: string, params) => defHttp.post({ ur
 export const listSkillDraftTests = (id: string, params) => defHttp.get({ url: `/openclaw/skill/draft/${id}/tests`, params });
 export const repairSkillDraft = (id: string, params) => defHttp.post({ url: `/openclaw/skill/draft/${id}/repair`, params, timeout: 120 * 1000 });
 export const applySkillDraftRepair = (id: string, params) => defHttp.post({ url: `/openclaw/skill/draft/${id}/repair/apply`, params });
+export const previewSkillDraftAiEdit = (id: string, params) =>
+  defHttp.post({ url: `/openclaw/skill/draft/${id}/ai-edit/preview`, params, timeout: 120 * 1000 });
+export const applySkillDraftAiEdit = (id: string, params) => defHttp.post({ url: `/openclaw/skill/draft/${id}/ai-edit/apply`, params });
 export const submitSkillDraft = (id: string) => defHttp.post({ url: `/openclaw/skill/draft/${id}/submit` });
 export const approveSkillDraft = (id: string) => defHttp.post({ url: `/openclaw/skill/draft/${id}/approve` });
 export const rejectSkillDraft = (id: string, reason: string) =>
