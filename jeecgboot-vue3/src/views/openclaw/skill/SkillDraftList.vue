@@ -4,6 +4,7 @@
       <template #tableTitle>
         <a-space>
           <a-button type="primary" preIcon="ant-design:plus-outlined" v-auth="'openclaw:skill:draft:add'" @click="openAdd">新建草稿</a-button>
+          <a-button preIcon="ant-design:robot-outlined" v-auth="'openclaw:skill:draft:add'" @click="openGenerate">AI Generate</a-button>
           <a-button preIcon="ant-design:copy-outlined" v-auth="'openclaw:skill:draft:add'" @click="openFromSkill">从 Skill 创建</a-button>
         </a-space>
       </template>
@@ -30,6 +31,17 @@
       </a-form>
     </a-modal>
 
+    <a-modal v-model:open="generateVisible" title="AI Generate Skill Draft" @ok="submitGenerate" destroyOnClose>
+      <a-form :model="generateForm" layout="vertical">
+        <a-form-item label="Requirement" required>
+          <a-textarea v-model:value="generateForm.requirement" :rows="5" placeholder="Describe what this Skill should help the Agent do." />
+        </a-form-item>
+        <a-form-item label="Draft Name"><a-input v-model:value="generateForm.draftName" placeholder="Optional" /></a-form-item>
+        <a-form-item label="Skill Slug"><a-input v-model:value="generateForm.skillSlug" placeholder="Optional, for example excel-summary" /></a-form-item>
+        <a-form-item label="Description"><a-textarea v-model:value="generateForm.description" :rows="3" /></a-form-item>
+      </a-form>
+    </a-modal>
+
     <a-modal v-model:open="fromSkillVisible" title="从正式 Skill 创建草稿" @ok="submitFromSkill" destroyOnClose>
       <a-form layout="vertical">
         <a-form-item label="Skill ID" required>
@@ -50,6 +62,7 @@
     addSkillDraft,
     approveSkillDraft,
     createSkillDraftFromSkill,
+    generateSkillDraft,
     lintSkillDraft,
     listSkillDrafts,
     publishSkillDraft,
@@ -61,9 +74,11 @@
   const router = useRouter();
   const { createMessage } = useMessage();
   const addVisible = ref(false);
+  const generateVisible = ref(false);
   const fromSkillVisible = ref(false);
   const sourceSkillId = ref('');
   const form = reactive<any>({});
+  const generateForm = reactive<any>({});
 
   const [registerTable, { reload }] = useTable({
     title: 'Skill 开发工作台',
@@ -109,6 +124,16 @@
     addVisible.value = true;
   }
 
+  function resetGenerateForm() {
+    Object.keys(generateForm).forEach((key) => delete generateForm[key]);
+    Object.assign(generateForm, { requirement: '', draftName: '', skillSlug: '', description: '' });
+  }
+
+  function openGenerate() {
+    resetGenerateForm();
+    generateVisible.value = true;
+  }
+
   function openFromSkill() {
     sourceSkillId.value = '';
     fromSkillVisible.value = true;
@@ -121,6 +146,18 @@
     }
     const draft = await addSkillDraft(form);
     addVisible.value = false;
+    reload();
+    openEditor(draft);
+  }
+
+  async function submitGenerate() {
+    if (!generateForm.requirement) {
+      createMessage.warning('Please describe the Skill requirement');
+      return;
+    }
+    const draft = await generateSkillDraft(generateForm);
+    generateVisible.value = false;
+    createMessage.success('Generated Skill draft');
     reload();
     openEditor(draft);
   }

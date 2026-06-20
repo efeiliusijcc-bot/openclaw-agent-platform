@@ -13,6 +13,7 @@ import org.jeecg.modules.openclaw.dto.OpenclawAgentRunTestDTO;
 import org.jeecg.modules.openclaw.dto.OpenclawSkillDraftCreateDTO;
 import org.jeecg.modules.openclaw.dto.OpenclawSkillDraftFileDTO;
 import org.jeecg.modules.openclaw.dto.OpenclawSkillDraftTestDTO;
+import org.jeecg.modules.openclaw.dto.OpenclawSkillGenerateDTO;
 import org.jeecg.modules.openclaw.entity.OpenclawAgent;
 import org.jeecg.modules.openclaw.entity.OpenclawAgentSkill;
 import org.jeecg.modules.openclaw.entity.OpenclawGatewayNode;
@@ -39,12 +40,17 @@ import org.jeecg.modules.openclaw.vo.OpenclawSkillDraftFileContentVO;
 import org.jeecg.modules.openclaw.vo.OpenclawSkillDraftFileNodeVO;
 import org.jeecg.modules.openclaw.vo.OpenclawSkillDraftLintVO;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -54,9 +60,11 @@ import java.nio.file.StandardOpenOption;
 import java.security.DigestInputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.Duration;
 import java.time.LocalDate;
 import java.util.Comparator;
 import java.util.Date;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -99,6 +107,15 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
     @Autowired
     private OpenclawWorkspaceMaterializer workspaceMaterializer;
 
+    @Value("${openclaw.skill.ai.base-url:${OPENCLAW_SKILL_AI_BASE_URL:}}")
+    private String skillAiBaseUrl;
+
+    @Value("${openclaw.skill.ai.api-key:${OPENCLAW_SKILL_AI_API_KEY:}}")
+    private String skillAiApiKey;
+
+    @Value("${openclaw.skill.ai.model:${OPENCLAW_SKILL_AI_MODEL:}}")
+    private String skillAiModel;
+
     @Override
     @Transactional(rollbackFor = Exception.class)
     public OpenclawSkillDraft createDraft(OpenclawSkillDraftCreateDTO dto) {
@@ -134,6 +151,34 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
         }
         auditLogService.log("skill_draft_create", "skill_draft", draft.getId(), draft);
         return draft;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public OpenclawSkillDraft generateDraft(OpenclawSkillGenerateDTO dto) {
+        GeneratedSkillSpec spec = generateSkillSpec(dto);
+        OpenclawSkillDraftCreateDTO createDTO = new OpenclawSkillDraftCreateDTO();
+        createDTO.setDraftName(spec.draftName);
+        createDTO.setSkillSlug(spec.skillSlug);
+        createDTO.setDescription(spec.description);
+        OpenclawSkillDraft draft = createDraft(createDTO);
+        Path root = draftRoot(draft);
+        try {
+            cleanupDraftFiles(root);
+            writeGeneratedFiles(root, spec.files);
+            scanFiles(draft);
+            OpenclawSkillDraftLintVO lint = lint(draft.getId());
+            draft = getById(draft.getId());
+            auditLogService.logSuccess("skill_draft_ai_generate", "skill_draft", draft.getId(), Map.of(
+                "draft", draft,
+                "lint", lint,
+                "requirement", trim(dto == null ? null : dto.getRequirement(), 800)
+            ));
+            return draft;
+        } catch (IOException | RuntimeException e) {
+            cleanupQuietly(root);
+            throw e instanceof RuntimeException ? (RuntimeException) e : new JeecgBootException("Generate Skill draft files failed: " + e.getMessage(), e);
+        }
     }
 
     @Override
@@ -793,6 +838,164 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
         }
     }
 
+    private GeneratedSkillSpec generateSkillSpec(OpenclawSkillGenerateDTO dto) {
+        if (dto == null || !StringUtils.hasText(dto.getRequirement())) {
+            throw new JeecgBootException("Skill generation requirement is required.");
+        }
+        try {
+            GeneratedSkillSpec aiSpec = callConfiguredSkillGenerator(dto);
+            if (aiSpec != null) {
+                return aiSpec;
+            }
+        } catch (Exception e) {
+            auditLogService.logFailure("skill_draft_ai_generate_model", "skill_draft", "new", Map.of("message", trim(e.getMessage(), 1000)));
+        }
+        return fallbackGeneratedSpec(dto);
+    }
+
+    private GeneratedSkillSpec callConfiguredSkillGenerator(OpenclawSkillGenerateDTO dto) throws IOException, InterruptedException {
+        if (!StringUtils.hasText(skillAiBaseUrl) || !StringUtils.hasText(skillAiModel)) {
+            return null;
+        }
+        String baseUrl = skillAiBaseUrl.trim();
+        while (baseUrl.endsWith("/")) {
+            baseUrl = baseUrl.substring(0, baseUrl.length() - 1);
+        }
+        JSONObject body = new JSONObject(true);
+        body.put("model", skillAiModel.trim());
+        body.put("temperature", 0.2);
+        JSONArray messages = new JSONArray();
+        messages.add(message("system", "You generate OpenClaw Skill draft files. Return only strict JSON with fields draftName, skillSlug, description, files. files is an array of {path, content}. Include SKILL.md with Purpose, When to use, Inputs, Outputs, Examples, Safety sections. Do not include unsafe commands or binary files."));
+        messages.add(message("user", "Requirement:\n" + dto.getRequirement() + "\n\nPreferred draftName: " + safeText(dto.getDraftName()) + "\nPreferred skillSlug: " + safeText(dto.getSkillSlug()) + "\nDescription: " + safeText(dto.getDescription())));
+        body.put("messages", messages);
+
+        HttpRequest.Builder builder = HttpRequest.newBuilder()
+            .uri(URI.create(baseUrl + "/chat/completions"))
+            .timeout(Duration.ofSeconds(60))
+            .header("Content-Type", "application/json")
+            .POST(HttpRequest.BodyPublishers.ofString(body.toJSONString(), StandardCharsets.UTF_8));
+        if (StringUtils.hasText(skillAiApiKey)) {
+            builder.header("Authorization", "Bearer " + skillAiApiKey.trim());
+        }
+        HttpResponse<String> response = HttpClient.newHttpClient().send(builder.build(), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            throw new JeecgBootException("Skill AI generator returned HTTP " + response.statusCode() + ": " + trim(response.body(), 1000));
+        }
+        JSONObject root = JSON.parseObject(response.body());
+        JSONArray choices = root.getJSONArray("choices");
+        if (choices == null || choices.isEmpty()) {
+            throw new JeecgBootException("Skill AI generator returned no choices.");
+        }
+        JSONObject first = choices.getJSONObject(0);
+        JSONObject responseMessage = first == null ? null : first.getJSONObject("message");
+        String content = responseMessage == null ? null : responseMessage.getString("content");
+        if (!StringUtils.hasText(content)) {
+            throw new JeecgBootException("Skill AI generator returned empty content.");
+        }
+        return parseGeneratedSpec(dto, JSON.parseObject(extractJsonObject(content)));
+    }
+
+    private JSONObject message(String role, String content) {
+        JSONObject message = new JSONObject(true);
+        message.put("role", role);
+        message.put("content", content);
+        return message;
+    }
+
+    private String extractJsonObject(String content) {
+        String value = content.trim();
+        if (value.startsWith("```")) {
+            value = value.replaceFirst("^```[a-zA-Z]*\\s*", "");
+            value = value.replaceFirst("\\s*```$", "");
+        }
+        int start = value.indexOf('{');
+        int end = value.lastIndexOf('}');
+        if (start < 0 || end <= start) {
+            throw new JeecgBootException("Skill AI generator response does not contain a JSON object.");
+        }
+        return value.substring(start, end + 1);
+    }
+
+    private GeneratedSkillSpec parseGeneratedSpec(OpenclawSkillGenerateDTO dto, JSONObject json) {
+        GeneratedSkillSpec spec = new GeneratedSkillSpec();
+        spec.draftName = firstText(json.getString("draftName"), dto.getDraftName(), "Generated OpenClaw Skill");
+        spec.skillSlug = normalizeSlug(firstText(json.getString("skillSlug"), dto.getSkillSlug(), spec.draftName));
+        spec.description = trim(firstText(json.getString("description"), dto.getDescription(), dto.getRequirement()), 2000);
+        spec.files = new LinkedHashMap<>();
+        JSONArray files = json.getJSONArray("files");
+        if (files != null) {
+            for (Object item : files) {
+                if (item instanceof JSONObject file) {
+                    addGeneratedFile(spec, file.getString("path"), file.getString("content"));
+                }
+            }
+        }
+        if (!spec.files.containsKey("SKILL.md")) {
+            addGeneratedFile(spec, "SKILL.md", skillMdContent(spec.draftName, spec.description, dto.getRequirement()));
+        }
+        return spec;
+    }
+
+    private GeneratedSkillSpec fallbackGeneratedSpec(OpenclawSkillGenerateDTO dto) {
+        GeneratedSkillSpec spec = new GeneratedSkillSpec();
+        spec.draftName = firstText(dto.getDraftName(), "Generated OpenClaw Skill");
+        spec.skillSlug = normalizeSlug(firstText(dto.getSkillSlug(), spec.draftName));
+        spec.description = trim(firstText(dto.getDescription(), dto.getRequirement()), 2000);
+        spec.files = new LinkedHashMap<>();
+        addGeneratedFile(spec, "SKILL.md", skillMdContent(spec.draftName, spec.description, dto.getRequirement()));
+        addGeneratedFile(spec, "README.md", "# " + spec.draftName + "\n\n" + spec.description + "\n\nGenerated as an editable OpenClaw Skill draft. Run Lint and tests before submitting for review.\n");
+        addGeneratedFile(spec, "examples/test_prompt.md", "Use this Skill for the following requirement:\n\n" + dto.getRequirement() + "\n");
+        return spec;
+    }
+
+    private String skillMdContent(String name, String description, String requirement) {
+        return "# " + safeText(name) + "\n\n"
+            + "## Purpose\n\n" + safeText(description) + "\n\n"
+            + "## When to use\n\nUse this Skill when the task matches this requirement:\n\n" + safeText(requirement) + "\n\n"
+            + "## Inputs\n\n- A user request related to the requirement.\n- Any files or context provided by the user.\n\n"
+            + "## Outputs\n\n- A clear response or generated artifact that satisfies the request.\n- Notes about assumptions, limits, and follow-up checks when needed.\n\n"
+            + "## Examples\n\nUser asks for help with the requirement. The agent applies this Skill, checks the available context, and returns the requested result.\n\n"
+            + "## Safety\n\nDo not run destructive commands, access files outside the workspace, or send sensitive data to external services unless the user explicitly requests it and policy allows it.\n";
+    }
+
+    private void addGeneratedFile(GeneratedSkillSpec spec, String path, String content) {
+        if (!StringUtils.hasText(path)) {
+            return;
+        }
+        String normalized = path.replace('\\', '/').trim();
+        if (normalized.startsWith("/") || normalized.contains("../") || normalized.equals("..") || normalized.startsWith("../")) {
+            throw new JeecgBootException("Generated file path is invalid: " + path);
+        }
+        pathSafetyService.rejectBlockedExtension(normalized);
+        spec.files.put(normalized, content == null ? "" : trim(content, 200_000));
+    }
+
+    private void cleanupDraftFiles(Path root) throws IOException {
+        if (!Files.exists(root)) {
+            return;
+        }
+        try (var walk = Files.walk(root)) {
+            for (Path item : walk.sorted(Comparator.reverseOrder()).toList()) {
+                if (!item.equals(root)) {
+                    pathSafetyService.rejectIfOutsideRoot(root, item);
+                    Files.deleteIfExists(item);
+                }
+            }
+        }
+    }
+
+    private void writeGeneratedFiles(Path root, Map<String, String> files) throws IOException {
+        if (files == null || files.isEmpty()) {
+            throw new JeecgBootException("Generated Skill must contain at least one file.");
+        }
+        for (Map.Entry<String, String> entry : files.entrySet()) {
+            Path target = root.resolve(entry.getKey()).normalize();
+            pathSafetyService.rejectIfOutsideRoot(root, target);
+            Files.createDirectories(target.getParent());
+            Files.writeString(target, entry.getValue(), StandardCharsets.UTF_8, StandardOpenOption.CREATE_NEW);
+        }
+    }
+
     private TestAgentContext prepareTestAgent(OpenclawSkillDraft draft, OpenclawSkillTestRun run) throws IOException {
         OpenclawWorkspace workspace = ensureTestWorkspace(draft);
         OpenclawAgent agent = ensureTestAgent(draft, workspace);
@@ -1004,6 +1207,22 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
         return value.substring(0, maxLength);
     }
 
+    private String firstText(String... values) {
+        if (values == null) {
+            return null;
+        }
+        for (String value : values) {
+            if (StringUtils.hasText(value)) {
+                return value.trim();
+            }
+        }
+        return null;
+    }
+
+    private String safeText(String value) {
+        return value == null ? "" : value;
+    }
+
     private String sha256Directory(Path root) throws IOException {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
@@ -1058,5 +1277,12 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
     private static class TestAgentContext {
         private OpenclawWorkspace workspace;
         private OpenclawAgent agent;
+    }
+
+    private static class GeneratedSkillSpec {
+        private String draftName;
+        private String skillSlug;
+        private String description;
+        private Map<String, String> files;
     }
 }

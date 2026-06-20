@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.extension.service.IService;
 import org.jeecg.modules.openclaw.dto.OpenclawSkillDraftCreateDTO;
 import org.jeecg.modules.openclaw.dto.OpenclawSkillDraftFileDTO;
 import org.jeecg.modules.openclaw.dto.OpenclawSkillDraftTestDTO;
+import org.jeecg.modules.openclaw.dto.OpenclawSkillGenerateDTO;
 import org.jeecg.modules.openclaw.entity.OpenclawSkill;
 import org.jeecg.modules.openclaw.entity.OpenclawSkillDraft;
 import org.jeecg.modules.openclaw.entity.OpenclawSkillTestRun;
@@ -15,6 +16,8 @@ import java.util.List;
 
 public interface IOpenclawSkillDraftService extends IService<OpenclawSkillDraft> {
     OpenclawSkillDraft createDraft(OpenclawSkillDraftCreateDTO dto);
+
+    OpenclawSkillDraft generateDraft(OpenclawSkillGenerateDTO dto);
 
     OpenclawSkillDraft createFromSkill(String skillId);
 

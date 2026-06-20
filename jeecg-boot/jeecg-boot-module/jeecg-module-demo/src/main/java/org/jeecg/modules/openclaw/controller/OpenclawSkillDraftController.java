@@ -12,6 +12,7 @@ import org.jeecg.modules.openclaw.constant.OpenclawConstants;
 import org.jeecg.modules.openclaw.dto.OpenclawSkillDraftCreateDTO;
 import org.jeecg.modules.openclaw.dto.OpenclawSkillDraftFileDTO;
 import org.jeecg.modules.openclaw.dto.OpenclawSkillDraftTestDTO;
+import org.jeecg.modules.openclaw.dto.OpenclawSkillGenerateDTO;
 import org.jeecg.modules.openclaw.entity.OpenclawSkill;
 import org.jeecg.modules.openclaw.entity.OpenclawSkillDraft;
 import org.jeecg.modules.openclaw.entity.OpenclawSkillTestRun;
@@ -66,6 +67,12 @@ public class OpenclawSkillDraftController {
     @RequiresPermissions("openclaw:skill:draft:add")
     public Result<OpenclawSkillDraft> add(@RequestBody OpenclawSkillDraftCreateDTO dto) {
         return Result.OK(draftService.createDraft(dto));
+    }
+
+    @PostMapping("/generate")
+    @RequiresPermissions("openclaw:skill:draft:add")
+    public Result<OpenclawSkillDraft> generate(@RequestBody OpenclawSkillGenerateDTO dto) {
+        return Result.OK(draftService.generateDraft(dto));
     }
 
     @PostMapping("/fromSkill")

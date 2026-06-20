@@ -26,6 +26,7 @@ export const exportSkill = (record) => downloadFile(`/openclaw/skill/${record.id
 export const checkSkillQuality = (id: string) => defHttp.get({ url: `/openclaw/skill/${id}/quality-check` });
 export const listSkillDrafts = (params) => defHttp.get({ url: '/openclaw/skill/draft/list', params });
 export const addSkillDraft = (params) => defHttp.post({ url: '/openclaw/skill/draft/add', params });
+export const generateSkillDraft = (params) => defHttp.post({ url: '/openclaw/skill/draft/generate', params, timeout: 90 * 1000 });
 export const createSkillDraftFromSkill = (skillId: string) =>
   defHttp.post({ url: '/openclaw/skill/draft/fromSkill', params: { skillId } }, { joinParamsToUrl: true });
 export const getSkillDraft = (id: string) => defHttp.get({ url: `/openclaw/skill/draft/${id}` });
