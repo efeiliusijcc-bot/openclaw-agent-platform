@@ -24,6 +24,7 @@
 
 - Local backend compile passed: `mvn -pl jeecg-boot-module/jeecg-module-demo -am -DskipTests compile`.
 - Server smoke: a temporary `draftsmoke` entry in `/root/.openclaw/draft-agents.json` appears in `openclaw agents list --json`; `openclaw agent --agent draftsmoke ...` no longer fails with unknown agent id. The remaining smoke failure was provider schema/tool payload rejection, which is a model execution failure and should be recorded as a Test failure with AI Repair context.
+- Deployment note: server had both system-level `/etc/systemd/system/openclaw-gateway.service` and root user-level `/root/.config/systemd/user/openclaw-gateway.service` enabled. The user-level service started a second `openclaw gateway --port 18089` process and caused repeated stale-process SIGTERM/restarts. Fix was `XDG_RUNTIME_DIR=/run/user/0 systemctl --user disable --now openclaw-gateway.service`, then restart the system-level `openclaw-gateway.service`.
 
 ## 2026-06-21 - AI Edit 工程化闭环部署复盘
 
