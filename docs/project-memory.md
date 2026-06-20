@@ -14,7 +14,7 @@
 - Fix: backend now supports `OPENCLAW_DRAFT_TEST_MODEL` / `openclaw.skill-draft.test-model`. Draft Test CLI execution passes `--model`, and the temporary draft-agent registry entry includes `model.primary`.
 - Gateway registry diagnostics were too noisy on stderr and polluted CLI failure text. `scripts/patch-openclaw-draft-agent-registry.py` now emits active/read/merge diagnostics only with `OPENCLAW_DRAFT_AGENT_DEBUG=1`; `read_failed` remains visible.
 - Additional Gateway WebSocket diagnostic patch: `client-1OJ6okpi.js` now emits `[jeecg-gateway-ws-close] {"code":...,"reason":...}` for non-1000 closes, or for all closes when `OPENCLAW_DRAFT_AGENT_DEBUG=1`.
-- Current evidence does not prove a true no-external-model Echo execution path. `openclaw agent` still runs an agent turn through the configured model; the Echo smoke Skill itself does not call external tools, but Gateway execution currently uses `openai/mimo-v2.5-pro`. TODO: only mark no-external-model complete if OpenClaw exposes a supported local skill runner or the product adds a clearly separated non-Gateway deterministic test mode.
+- Echo no-external-model acceptance now uses an explicit local Draft Test runner. Request body sets `localExecution: true`, and the server must enable `OPENCLAW_DRAFT_LOCAL_TEST_ENABLED=true`. The backend still performs JEECG auth, Lint, isolated draft workspace materialization, temporary draft-agent registry write, Run/Test persistence, artifact writing, and AI Repair context. For local execution it runs the single `skills/<slug>/main.py` entrypoint (`run(input_text)` or `main(input_text)`) via `python3` and does not call `openclaw agent` or any model provider. Ordinary Draft Tests still use the Gateway CLI path unless `localExecution` is explicitly requested and enabled.
 
 ### Mistakes Recorded
 
@@ -30,7 +30,7 @@
 - Echo Draft acceptance passed: create draft, save files, Lint, Test, and expected `ECHO_OK_*` output all succeeded.
 - Invoice AI Edit acceptance passed: preview, apply, read back invoice content, Lint, Test, and test history succeeded.
 - AI Repair after failed test passed: inserting `rm -rf` into `main.py` made Test fail at lint; AI Repair returned a summary and file suggestion.
-- After the WebSocket close diagnostic patch, Echo Draft, Invoice AI Edit, and AI Repair failed-test smoke all still pass. Recent Gateway logs contain no `1006` or `FailoverError`; one non-1000 close diagnostic was observed as `code=1005, reason=""`.
+- After the local runner patch, Echo Draft acceptance passed with artifact `runner=local-skill`, `exitCode=0`, and exact output `ECHO_OK_*`; this proves the Echo smoke did not call the external model path. Invoice AI Edit still passes through the normal Gateway path. AI Repair after failed lint still returns a summary and file suggestion. Recent Gateway logs contain no `1006` or `FailoverError`; one historical non-1000 close diagnostic was observed as `code=1005, reason=""`.
 
 ## 2026-06-21 - Skill Draft Test Temporary Agent Registry
 
