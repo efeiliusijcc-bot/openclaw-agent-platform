@@ -1,6 +1,8 @@
 package org.jeecg.modules.openclaw.service.impl;
 
 import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONArray;
+import com.alibaba.fastjson.JSONObject;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.IdWorker;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
@@ -40,6 +42,7 @@ import java.nio.file.StandardOpenOption;
 import java.security.DigestInputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.LocalDate;
 import java.util.Comparator;
 import java.util.Date;
 import java.util.List;
@@ -423,6 +426,51 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
         return draft;
     }
 
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public OpenclawSkill publishDraft(String draftId) {
+        OpenclawSkillDraft draft = requirePublishableDraft(draftId);
+        String version = nextPublishVersion(draft);
+        Path targetDir = officialSkillPath(draft, version);
+        if (Files.exists(targetDir)) {
+            throw new JeecgBootException("Skill target directory already exists.");
+        }
+        try {
+            Files.createDirectories(targetDir.getParent());
+            copyDirectory(draftRoot(draft), targetDir);
+            writeSkillManifest(targetDir, draft.getDraftName(), draft.getSkillSlug(), version, draft.getDescription(), draft.getOwnerUsername());
+
+            OpenclawSkill skill = new OpenclawSkill();
+            skill.setOwnerUserId(draft.getOwnerUserId());
+            skill.setOwnerUsername(draft.getOwnerUsername());
+            skill.setName(draft.getDraftName());
+            skill.setSlug(draft.getSkillSlug());
+            skill.setVersion(version);
+            skill.setScope("public");
+            skill.setStatus(OpenclawConstants.SKILL_STATUS_APPROVED);
+            skill.setDescription(draft.getDescription());
+            skill.setPath(targetDir.toString());
+            skill.setChecksum(sha256Directory(targetDir));
+            skill.setFileSize(directorySize(targetDir));
+            skill.setRemark("Published from Skill Draft " + draft.getId());
+            skill.setDelFlag(OpenclawConstants.DEL_FLAG_NORMAL);
+            skillService.save(skill);
+
+            draft.setStatus("published");
+            draft.setReviewStatus("published");
+            draft.setSkillId(skill.getId());
+            updateById(draft);
+            auditLogService.logSuccess("skill_draft_publish", "skill_draft", draft.getId(), Map.of("draft", draft, "skill", skill));
+            return skill;
+        } catch (IOException e) {
+            cleanupQuietly(targetDir);
+            throw new JeecgBootException("Publish Skill draft failed: " + e.getMessage(), e);
+        } catch (RuntimeException e) {
+            cleanupQuietly(targetDir);
+            throw e;
+        }
+    }
+
     private OpenclawSkillDraft requireDraft(String draftId, boolean editable) {
         OpenclawSkillDraft draft = getById(draftId);
         if (draft == null || Integer.valueOf(OpenclawConstants.DEL_FLAG_DELETED).equals(draft.getDelFlag())) {
@@ -451,6 +499,65 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
             throw new JeecgBootException("Only submitted Skill drafts can be reviewed.");
         }
         return draft;
+    }
+
+    private OpenclawSkillDraft requirePublishableDraft(String draftId) {
+        LoginUser reviewer = permissionService.currentUser();
+        if (!permissionService.isSkillReviewer(reviewer)) {
+            throw new JeecgBootException("Only OpenClaw Skill reviewers can publish Skill drafts.");
+        }
+        OpenclawSkillDraft draft = getById(draftId);
+        if (draft == null || Integer.valueOf(OpenclawConstants.DEL_FLAG_DELETED).equals(draft.getDelFlag())) {
+            throw new JeecgBootException("Skill draft does not exist.");
+        }
+        if (!"approved".equals(draft.getStatus())) {
+            throw new JeecgBootException("Only approved Skill drafts can be published.");
+        }
+        return draft;
+    }
+
+    private String nextPublishVersion(OpenclawSkillDraft draft) {
+        String version = incrementPatchVersion(draft.getBaseVersion());
+        int guard = 0;
+        while (skillService.lambdaQuery()
+            .eq(OpenclawSkill::getOwnerUserId, draft.getOwnerUserId())
+            .eq(OpenclawSkill::getSlug, draft.getSkillSlug())
+            .eq(OpenclawSkill::getVersion, version)
+            .eq(OpenclawSkill::getDelFlag, OpenclawConstants.DEL_FLAG_NORMAL)
+            .count() > 0) {
+            version = incrementPatchVersion(version);
+            guard++;
+            if (guard > 1000) {
+                throw new JeecgBootException("Cannot allocate next Skill version.");
+            }
+        }
+        return version;
+    }
+
+    private String incrementPatchVersion(String baseVersion) {
+        if (!StringUtils.hasText(baseVersion)) {
+            return "1.0.0";
+        }
+        String version = baseVersion.trim();
+        String[] parts = version.split("\\.");
+        if (parts.length != 3) {
+            return version + ".1";
+        }
+        try {
+            int patch = Integer.parseInt(parts[2]);
+            return parts[0] + "." + parts[1] + "." + (patch + 1);
+        } catch (NumberFormatException e) {
+            return version + ".1";
+        }
+    }
+
+    private Path officialSkillPath(OpenclawSkillDraft draft, String version) {
+        Path ownerRoot = Paths.get(OpenclawConstants.SKILL_ROOT, draft.getOwnerUserId()).toAbsolutePath().normalize();
+        Path target = ownerRoot.resolve(draft.getSkillSlug()).resolve(version).normalize();
+        if (!target.startsWith(ownerRoot)) {
+            throw new JeecgBootException("Invalid Skill target path.");
+        }
+        return target;
     }
 
     private void validateDraftRequest(OpenclawSkillDraftCreateDTO dto) {
@@ -671,6 +778,35 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
         return workspaceRoot;
     }
 
+    private void writeSkillManifest(Path root, String name, String slug, String version, String description, String owner) throws IOException {
+        JSONObject manifest = new JSONObject(true);
+        manifest.put("name", name);
+        manifest.put("slug", slug);
+        manifest.put("version", version);
+        manifest.put("description", description);
+        manifest.put("owner", owner);
+        manifest.put("generatedAt", LocalDate.now().toString());
+        manifest.put("entry", "SKILL.md");
+
+        JSONArray files = new JSONArray();
+        try (var walk = Files.walk(root)) {
+            List<Path> regularFiles = walk
+                .filter(Files::isRegularFile)
+                .filter(path -> !"manifest.json".equals(path.getFileName().toString()))
+                .sorted()
+                .toList();
+            for (Path file : regularFiles) {
+                JSONObject item = new JSONObject(true);
+                item.put("path", root.relativize(file).toString().replace('\\', '/'));
+                item.put("size", Files.size(file));
+                item.put("checksum", sha256File(file));
+                files.add(item);
+            }
+        }
+        manifest.put("files", files);
+        Files.writeString(root.resolve("manifest.json"), manifest.toJSONString() + System.lineSeparator(), StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+    }
+
     private void finishTestRun(OpenclawSkillTestRun run, Date start, String status, String output, String error, String workspacePath) {
         Date finish = new Date();
         run.setStatus(status);
@@ -723,6 +859,37 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
             return value;
         }
         return value.substring(0, maxLength);
+    }
+
+    private String sha256Directory(Path root) throws IOException {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            try (var walk = Files.walk(root)) {
+                for (Path file : walk.filter(Files::isRegularFile).sorted().toList()) {
+                    digest.update(root.relativize(file).toString().replace('\\', '/').getBytes(StandardCharsets.UTF_8));
+                    digest.update(sha256File(file).getBytes(StandardCharsets.UTF_8));
+                }
+            }
+            StringBuilder sb = new StringBuilder();
+            for (byte b : digest.digest()) {
+                sb.append(String.format("%02x", b));
+            }
+            return sb.toString();
+        } catch (NoSuchAlgorithmException e) {
+            throw new JeecgBootException("Current JDK does not support SHA-256.", e);
+        }
+    }
+
+    private long directorySize(Path root) throws IOException {
+        try (var walk = Files.walk(root)) {
+            return walk.filter(Files::isRegularFile).mapToLong(path -> {
+                try {
+                    return Files.size(path);
+                } catch (IOException e) {
+                    throw new JeecgBootException("Read file size failed: " + e.getMessage(), e);
+                }
+            }).sum();
+        }
     }
 
     private String sha256File(Path file) throws IOException {

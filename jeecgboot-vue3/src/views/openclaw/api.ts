@@ -42,6 +42,7 @@ export const submitSkillDraft = (id: string) => defHttp.post({ url: `/openclaw/s
 export const approveSkillDraft = (id: string) => defHttp.post({ url: `/openclaw/skill/draft/${id}/approve` });
 export const rejectSkillDraft = (id: string, reason: string) =>
   defHttp.post({ url: `/openclaw/skill/draft/${id}/reject`, params: { reason } }, { joinParamsToUrl: true });
+export const publishSkillDraft = (id: string) => defHttp.post({ url: `/openclaw/skill/draft/${id}/publish` });
 
 export const listRuns = (params) => defHttp.get({ url: '/openclaw/run/list', params });
 export const getRunDetail = (id: string) => defHttp.get({ url: `/openclaw/run/${id}` });

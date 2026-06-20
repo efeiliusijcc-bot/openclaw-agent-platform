@@ -12,6 +12,7 @@ import org.jeecg.modules.openclaw.constant.OpenclawConstants;
 import org.jeecg.modules.openclaw.dto.OpenclawSkillDraftCreateDTO;
 import org.jeecg.modules.openclaw.dto.OpenclawSkillDraftFileDTO;
 import org.jeecg.modules.openclaw.dto.OpenclawSkillDraftTestDTO;
+import org.jeecg.modules.openclaw.entity.OpenclawSkill;
 import org.jeecg.modules.openclaw.entity.OpenclawSkillDraft;
 import org.jeecg.modules.openclaw.entity.OpenclawSkillTestRun;
 import org.jeecg.modules.openclaw.service.IOpenclawPermissionService;
@@ -139,6 +140,12 @@ public class OpenclawSkillDraftController {
     @RequiresPermissions("openclaw:skill:review")
     public Result<OpenclawSkillDraft> reject(@PathVariable String id, @RequestParam String reason) {
         return Result.OK(draftService.rejectDraft(id, reason));
+    }
+
+    @PostMapping("/{id}/publish")
+    @RequiresPermissions("openclaw:skill:review")
+    public Result<OpenclawSkill> publish(@PathVariable String id) {
+        return Result.OK(draftService.publishDraft(id));
     }
 
     @GetMapping("/{id}/tests")

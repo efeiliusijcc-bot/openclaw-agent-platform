@@ -52,6 +52,7 @@
     createSkillDraftFromSkill,
     lintSkillDraft,
     listSkillDrafts,
+    publishSkillDraft,
     rejectSkillDraft,
     submitSkillDraft,
   } from '../api';
@@ -166,6 +167,10 @@
     return record.status === 'submitted';
   }
 
+  function canPublish(record) {
+    return record.status === 'approved';
+  }
+
   function approveReview(record) {
     Modal.confirm({
       title: `Approve ${record.draftName}?`,
@@ -197,6 +202,17 @@
     });
   }
 
+  function publishReview(record) {
+    Modal.confirm({
+      title: `Publish ${record.draftName} as a formal Skill?`,
+      onOk: async () => {
+        const skill = await publishSkillDraft(record.id);
+        createMessage.success(`Published ${skill.slug} ${skill.version}`);
+        reload();
+      },
+    });
+  }
+
   function actions(record) {
     return [
       { label: '编辑', auth: 'openclaw:skill:draft:edit', onClick: () => openEditor(record) },
@@ -204,6 +220,7 @@
       { label: 'Submit', auth: 'openclaw:skill:draft:submit', ifShow: canSubmit(record), onClick: () => submitReview(record) },
       { label: 'Approve', auth: 'openclaw:skill:review', ifShow: canReview(record), onClick: () => approveReview(record) },
       { label: 'Reject', auth: 'openclaw:skill:review', ifShow: canReview(record), onClick: () => rejectReview(record) },
+      { label: 'Publish', auth: 'openclaw:skill:review', ifShow: canPublish(record), onClick: () => publishReview(record) },
     ];
   }
 </script>

@@ -9,6 +9,7 @@
         <a-button preIcon="ant-design:audit-outlined" :disabled="!canSubmit" @click="submitReview">Submit</a-button>
         <a-button preIcon="ant-design:check-outlined" :disabled="!canReview" @click="approveReview">Approve</a-button>
         <a-button danger preIcon="ant-design:close-outlined" :disabled="!canReview" @click="rejectReview">Reject</a-button>
+        <a-button preIcon="ant-design:cloud-upload-outlined" :disabled="!canPublish" @click="publishReview">Publish</a-button>
       </a-space>
       <div class="current-path">{{ draft?.status || '-' }} / {{ currentPath || '请选择文件' }}</div>
     </div>
@@ -101,6 +102,7 @@
     getSkillDraftTree,
     lintSkillDraft,
     listSkillDraftTests,
+    publishSkillDraft,
     readSkillDraftFile,
     rejectSkillDraft,
     runSkillDraftTest,
@@ -135,6 +137,7 @@
   const hasLintMessages = computed(() => (lintResult.value?.errors?.length || 0) > 0 || (lintResult.value?.warnings?.length || 0) > 0);
   const canEdit = computed(() => ['editing', 'lint_failed', 'lint_passed', 'test_failed', 'rejected'].includes(draft.value?.status));
   const canReview = computed(() => draft.value?.status === 'submitted');
+  const canPublish = computed(() => draft.value?.status === 'approved');
   const canSubmit = computed(() => canEdit.value && draft.value?.lastTestStatus === 'success');
 
   onMounted(async () => {
@@ -279,6 +282,18 @@
       onOk: async () => {
         await rejectSkillDraft(draftId.value, reason);
         createMessage.warning('Rejected');
+        await loadDraft();
+      },
+    });
+  }
+
+  function publishReview() {
+    if (!canPublish.value) return;
+    Modal.confirm({
+      title: 'Publish this draft as a formal Skill?',
+      onOk: async () => {
+        const skill = await publishSkillDraft(draftId.value);
+        createMessage.success(`Published ${skill.slug} ${skill.version}`);
         await loadDraft();
       },
     });
