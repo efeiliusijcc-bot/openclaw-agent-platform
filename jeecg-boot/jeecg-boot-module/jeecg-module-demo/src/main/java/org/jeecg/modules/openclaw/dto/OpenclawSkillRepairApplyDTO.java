@@ -7,6 +7,7 @@ import java.util.List;
 
 @Data
 public class OpenclawSkillRepairApplyDTO {
+    private String recordId;
     private String reason;
     private List<FilePatch> files = new ArrayList<>();
 

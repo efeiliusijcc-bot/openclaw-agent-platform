@@ -1,5 +1,15 @@
 # Project Memory
 
+## 2026-06-21 - Skill Draft Closed Loop Productization
+
+- Scope: productize the Skill Draft AI Edit / Test / Repair loop without publishing draft Skills and without creating formal Agent/Skill binding rows for tests.
+- Test Report is now standardized on `openclaw_skill_test_run`: `testRunId`, `draftId`, `agentKey`, `status` (`PASSED/FAILED` in the report), `lintStatus`, `gatewayStatus`, `input`, `output`, `error.type`, `error.message`, `error.code`, `logs`, `startedAt`, `finishedAt`, and `durationMs`. The raw internal run status remains `success/failed/timeout` for existing draft workflow compatibility. A report snapshot is persisted in `report_json`, and the report is queryable with `/openclaw/skill/draft/{draftId}/tests/{testRunId}/report`.
+- Repair Preview now requires a related `testRunId` or an existing latest test run. It stores suggestions in `openclaw_skill_ai_edit_record` with `record_type=AI_REPAIR`, `test_run_id`, base version/hash, and the pre-repair test status. Repair Apply now requires `recordId`; it no longer trusts frontend-returned file content. It reuses the same action normalization, path whitelist, content limit, base version/hash validation, and file apply logic as AI Edit.
+- Repair status tracking: applying a repair records the pre-apply test status; later draft tests update the latest applied AI_REPAIR record with the latest post-repair test status.
+- Frontend `SkillEditor.vue` now shows a structured Test Report panel, loads the latest report after test history loads, loads the new report after a test run, applies AI Repair by `recordId`, and keeps a repair-applied modal open with Run Lint Again / Run Test Again actions.
+- Added server acceptance script `scripts/openclaw_skill_draft_closed_loop_acceptance.py` covering invoice AI Edit preview/apply/lint, Echo local test passed with report lookup, failed local test plus AI Repair preview/apply, and recent Gateway log checks for `unknown agent id`, `1006`, `abnormal`, and `FailoverError`.
+- Database migration added as `V3.9.2_23__openclaw_skill_test_report_repair_record.sql` for both MySQL and PostgreSQL. Current production has historically disabled Flyway in prod; if still disabled, these columns/indexes must be applied manually during deployment.
+
 ## 2026-06-21 - Skill Draft AI Edit Action Compatibility Fix
 
 - During the invoice AI Edit acceptance flow, `/openclaw/skill/draft/{id}/ai-edit/preview` failed when the model returned a file suggestion with `action: update`; the backend validator only allowed `upsert/delete` and returned `Unsupported AI edit action: update`.

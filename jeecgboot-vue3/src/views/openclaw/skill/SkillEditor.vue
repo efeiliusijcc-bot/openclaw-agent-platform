@@ -67,6 +67,26 @@
             <a-empty v-if="!testRuns.length" description="暂无测试记录" />
           </div>
         </a-card>
+        <a-card size="small" title="Test Report" class="test-report-card" :loading="reportLoading">
+          <a-empty v-if="!selectedReport" description="No report selected" />
+          <template v-else>
+            <a-descriptions :column="1" size="small" bordered>
+              <a-descriptions-item label="Status">{{ selectedReport.status }}</a-descriptions-item>
+              <a-descriptions-item label="Test Run">{{ selectedReport.testRunId }}</a-descriptions-item>
+              <a-descriptions-item label="Agent">{{ selectedReport.agentKey || '-' }}</a-descriptions-item>
+              <a-descriptions-item label="Lint">{{ selectedReport.lintStatus || '-' }}</a-descriptions-item>
+              <a-descriptions-item label="Gateway">{{ selectedReport.gatewayStatus || '-' }}</a-descriptions-item>
+              <a-descriptions-item label="Duration">{{ selectedReport.durationMs ?? '-' }}ms</a-descriptions-item>
+              <a-descriptions-item label="Error">{{ selectedReport.error?.type || '-' }} / {{ selectedReport.error?.code || '-' }}</a-descriptions-item>
+            </a-descriptions>
+            <a-tabs size="small">
+              <a-tab-pane key="input" tab="Input"><pre class="report-pre">{{ selectedReport.input || '-' }}</pre></a-tab-pane>
+              <a-tab-pane key="output" tab="Output"><pre class="report-pre">{{ selectedReport.output || '-' }}</pre></a-tab-pane>
+              <a-tab-pane key="error" tab="Error"><pre class="report-pre">{{ selectedReport.error?.message || '-' }}</pre></a-tab-pane>
+              <a-tab-pane key="logs" tab="Logs"><pre class="report-pre">{{ (selectedReport.logs || []).join('\n') || '-' }}</pre></a-tab-pane>
+            </a-tabs>
+          </template>
+        </a-card>
         <a-card size="small" title="Lint 结果">
           <a-descriptions :column="1" size="small" bordered>
             <a-descriptions-item label="状态">{{ lintResult?.status || '-' }}</a-descriptions-item>
@@ -117,8 +137,12 @@
         </a-tabs>
       </div>
       <a-button v-if="repairResult?.files?.length" type="primary" block :loading="applyingRepair" @click="applyAllRepairs">
-        {{ repairResult?.recordId ? 'Confirm and Apply AI Edit' : 'Apply All Suggestions' }}
+        {{ repairResult?.recordId ? (suggestionMode === 'aiEdit' ? 'Confirm and Apply AI Edit' : 'Confirm and Apply AI Repair') : 'Apply All Suggestions' }}
       </a-button>
+      <a-space v-if="repairResult?.source === 'applied' && suggestionMode === 'repair'" direction="vertical" style="width: 100%; margin-top: 12px">
+        <a-button block preIcon="ant-design:check-circle-outlined" @click="runLint">Run Lint Again</a-button>
+        <a-button block type="primary" preIcon="ant-design:play-circle-outlined" @click="runTest">Run Test Again</a-button>
+      </a-space>
     </a-modal>
 
     <a-modal v-model:open="batchVisible" title="Batch Test Cases" :confirmLoading="batchTesting" @ok="runBatchTest" destroyOnClose>
@@ -152,6 +176,7 @@
     createSkillDraftFile,
     deleteSkillDraftFile,
     getSkillDraft,
+    getSkillDraftTestReport,
     getSkillDraftTree,
     lintSkillDraft,
     listSkillDraftTests,
@@ -188,7 +213,10 @@
   const repairTitle = ref('AI Repair Suggestions');
   const repairVisible = ref(false);
   const repairResult = ref<any>(null);
+  const suggestionMode = ref<'aiEdit' | 'repair'>('repair');
   const testRuns = ref<any[]>([]);
+  const selectedReport = ref<any>(null);
+  const reportLoading = ref(false);
   const createVisible = ref(false);
   const createDirectory = ref(false);
   const newPath = ref('');
@@ -301,6 +329,7 @@
     try {
       const result = await runSkillDraftTest(draftId.value, { prompt: testPrompt.value, expectedOutput: expectedOutput.value });
       createMessage[result.status === 'success' ? 'success' : 'warning'](`测试 ${result.status}`);
+      await loadTestReport(result.id);
       await loadDraft();
       await loadTestRuns();
     } finally {
@@ -360,6 +389,7 @@
       repairResult.value = await previewSkillDraftAiEdit(draftId.value, {
         instruction: aiEditInstruction.value.trim(),
       });
+      suggestionMode.value = 'aiEdit';
       repairTitle.value = 'AI Edit Suggestions';
       aiEditVisible.value = false;
       repairVisible.value = true;
@@ -377,6 +407,7 @@
         testRunId: latestFailed?.id || draft.value?.lastTestRunId,
         instruction: 'Analyze the latest lint and test failure, then suggest the smallest safe Skill file changes.',
       });
+      suggestionMode.value = 'repair';
       repairTitle.value = 'AI Repair Suggestions';
       repairVisible.value = true;
     } finally {
@@ -396,47 +427,34 @@
     if (!files?.length) return;
     if (repairResult.value?.recordId) {
       Modal.confirm({
-        title: 'Apply this AI edit preview?',
+        title: suggestionMode.value === 'aiEdit' ? 'Apply this AI edit preview?' : 'Apply this AI repair preview?',
         content: 'This will write the suggested files into the current draft. Run Lint and tests after applying.',
         onOk: async () => {
-          await applyAiEditPreview();
+          await applySuggestionPreview();
         },
       });
       return;
     }
-    applyingRepair.value = true;
-    try {
-      await applySkillDraftRepair(draftId.value, {
-        reason: repairResult.value?.summary,
-        files: files.map((file) => ({
-          path: file.path,
-          action: file.action || 'upsert',
-          content: file.content || '',
-          explanation: file.explanation || '',
-        })),
-      });
-      createMessage.success('Repair applied');
-      repairVisible.value = false;
-      await loadDraft();
-      await loadTree();
-      await loadTestRuns();
-      if (currentPath.value) {
-        await onSelectFile([currentPath.value]);
-      }
-    } finally {
-      applyingRepair.value = false;
-    }
+    createMessage.warning('Please regenerate suggestions before applying; recordId is required.');
   }
 
-  async function applyAiEditPreview() {
+  async function applySuggestionPreview() {
     applyingRepair.value = true;
     try {
-      await applySkillDraftAiEdit(draftId.value, {
-        recordId: repairResult.value.recordId,
-        reason: repairResult.value?.summary,
-      });
-      createMessage.success('AI edit applied. Please run Lint and tests next.');
-      repairVisible.value = false;
+      if (suggestionMode.value === 'aiEdit') {
+        repairResult.value = await applySkillDraftAiEdit(draftId.value, {
+          recordId: repairResult.value.recordId,
+          reason: repairResult.value?.summary,
+        });
+        createMessage.success('AI edit applied. Please run Lint and tests next.');
+        repairVisible.value = false;
+      } else {
+        repairResult.value = await applySkillDraftRepair(draftId.value, {
+          recordId: repairResult.value.recordId,
+          reason: repairResult.value?.summary,
+        });
+        createMessage.success('Repair applied. Run Lint and test again.');
+      }
       await loadDraft();
       await loadTree();
       await loadTestRuns();
@@ -508,6 +526,19 @@
   async function loadTestRuns() {
     const result = await listSkillDraftTests(draftId.value, { pageNo: 1, pageSize: 5 });
     testRuns.value = result?.records || [];
+    if (!selectedReport.value && testRuns.value.length) {
+      await loadTestReport(testRuns.value[0].id);
+    }
+  }
+
+  async function loadTestReport(testRunId: string) {
+    if (!testRunId) return;
+    reportLoading.value = true;
+    try {
+      selectedReport.value = await getSkillDraftTestReport(draftId.value, testRunId);
+    } finally {
+      reportLoading.value = false;
+    }
   }
 
   function goBack() {
@@ -609,6 +640,20 @@
 
   .test-run-card {
     margin-bottom: 12px;
+  }
+
+  .test-report-card {
+    margin-bottom: 12px;
+  }
+
+  .report-pre {
+    max-height: 180px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    background: #f5f5f5;
+    padding: 8px;
+    margin: 8px 0 0;
   }
 
   .test-history {

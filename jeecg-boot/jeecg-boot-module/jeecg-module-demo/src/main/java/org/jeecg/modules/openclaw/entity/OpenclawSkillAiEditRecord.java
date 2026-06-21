@@ -22,6 +22,8 @@ public class OpenclawSkillAiEditRecord extends JeecgEntity implements Serializab
     private String skillId;
     private String workspaceId;
     private String userId;
+    private String recordType;
+    private String testRunId;
     private String userInstruction;
     private String summary;
     private String filesJson;
@@ -30,5 +32,7 @@ public class OpenclawSkillAiEditRecord extends JeecgEntity implements Serializab
     private String baseHash;
     private String status;
     private String errorMessage;
+    private String repairBeforeStatus;
+    private String repairAfterStatus;
     private Date appliedTime;
 }

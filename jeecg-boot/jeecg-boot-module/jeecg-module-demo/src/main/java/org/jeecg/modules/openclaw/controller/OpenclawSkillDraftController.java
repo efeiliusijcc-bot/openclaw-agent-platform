@@ -29,6 +29,7 @@ import org.jeecg.modules.openclaw.vo.OpenclawSkillDraftFileNodeVO;
 import org.jeecg.modules.openclaw.vo.OpenclawSkillDraftLintVO;
 import org.jeecg.modules.openclaw.vo.OpenclawSkillAiEditVO;
 import org.jeecg.modules.openclaw.vo.OpenclawSkillRepairVO;
+import org.jeecg.modules.openclaw.vo.OpenclawSkillTestReportVO;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -208,5 +209,11 @@ public class OpenclawSkillDraftController {
         queryWrapper.eq("del_flag", OpenclawConstants.DEL_FLAG_NORMAL);
         queryWrapper.orderByDesc("create_time");
         return Result.OK(testRunService.page(new Page<>(pageNo, pageSize), queryWrapper));
+    }
+
+    @GetMapping("/{id}/tests/{testRunId}/report")
+    @RequiresPermissions("openclaw:skill:draft:edit")
+    public Result<OpenclawSkillTestReportVO> testReport(@PathVariable String id, @PathVariable String testRunId) {
+        return Result.OK(draftService.testReport(id, testRunId));
     }
 }
