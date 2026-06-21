@@ -176,3 +176,45 @@
 - 验收自然语言改写质量时必须检查 `source=ai`；`source=fallback` 只能说明降级链路可用，不能证明模型改写能力可用。
 - 生产部署后不仅要检查新表，也要检查历史 OpenClaw 增量字段和索引，尤其是 prod 禁用 Flyway 的环境。
 - Skill Draft Test 目前依赖 Gateway 能识别临时草稿 agent id；若要让 Test 通过，需要补齐 Gateway 对 draft skill test agent 的注册/临时执行支持。
+
+## 2026-06-21 - Skill 草稿 AI Edit/Test/Repair 闭环产品化验收
+
+### 本次实现范围
+
+- 本地与服务器代码提交：`8a7d95ce feat(openclaw): productize skill draft test repair loop`。
+- 服务器 `116.204.135.83` 已拉取该提交，后端 jar 与前端 dist 已部署到 `/opt/openclaw-jeecg`。
+- 生产环境 Flyway 仍为禁用状态，本次新增 MySQL 迁移已手动执行并验证字段存在；PostgreSQL 迁移脚本已同步维护但未在当前 MySQL 生产库执行。
+
+### 后端落地方式
+
+- `openclaw_skill_test_run` 增加标准化 Test Report 字段：`agent_key`、`lint_status`、`gateway_status`、`input_json`、`output_json`、`error_type`、`error_code`、`logs_json`、`report_json`。
+- 新增 Test Report 查询接口：`GET /openclaw/skill/draft/{draftId}/tests/{testRunId}/report`，继续受 `openclaw:skill:draft:edit` 权限保护。
+- Draft Test 只使用临时 Draft Agent 注册与隔离测试工作区，不写正式 `openclaw_agent`、`openclaw_skill` 或绑定表。
+- AI Repair 必须关联 `testRunId` 或最近一次测试记录，保存为 `record_type=AI_REPAIR`。
+- Repair Apply 只信任后端保存的 `recordId`，复用 AI Edit 的 action 归一化、路径白名单、版本/hash 校验和草稿写入流程，不信任前端回传 files。
+- 后续 Test 会回写最近已应用 AI Repair 记录的 `repair_after_status`。
+
+### 前端落地方式
+
+- Skill 编辑器补齐 AI Edit、AI Repair、summary/files/warnings 展示、修改建议查看与应用。
+- Lint/Test 后展示标准化 Test Report，包括状态、lint、gateway、输入输出、错误和日志。
+- Repair 应用成功后保留操作入口，可继续重新 Lint 和重新 Test。
+
+### 服务器验收结果
+
+- 验收脚本：`scripts/openclaw_skill_draft_closed_loop_acceptance.py`。
+- 执行位置：服务器 `/opt/openclaw-build/jeecgboot`。
+- 结果：`success=true`。
+
+关键链路：
+
+- AI Edit 发票抽取：创建临时草稿成功；输入“把这个 Skill 改成发票抽取 Skill”后，preview 返回 `recordId`、`summary`、`files`、`warnings`；apply 成功；读取草稿确认内容包含发票/invoice；Lint passed。
+- Echo 正向验收：创建临时 Echo Skill 草稿，输入 `{"text":"hello"}`，Test `runStatus=success`，输出包含期望值；Test Report 查询返回 `status=PASSED`、`lintStatus=lint_passed`、`gatewayStatus=OK`。
+- 故意失败 + AI Repair：故意抛异常的草稿 Test `runStatus=failed`；AI Repair preview 关联失败 `testRunId`，返回 `recordId`、summary 和 files；Repair apply 成功；apply 后 Lint passed。
+- Gateway 日志检查：未发现 `unknown agent id`、`1006`、`abnormal`、`FailoverError`。
+
+### 后续注意
+
+- 当前验收证明 Repair preview/apply 和重新 Lint 链路可用；脚本没有强制要求 Repair 后重新 Test 必须由失败变成功，因为模型修复结果存在不确定性。
+- 生产继续禁用 Flyway 时，每次新增 OpenClaw 表或字段都必须手动执行并验证 MySQL 结构。
+- 不要把草稿测试结果持久化为正式 Agent/Skill；正式发布仍应走后续独立 Publish/Review 流程。
