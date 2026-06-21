@@ -218,3 +218,57 @@
 - 当前验收证明 Repair preview/apply 和重新 Lint 链路可用；脚本没有强制要求 Repair 后重新 Test 必须由失败变成功，因为模型修复结果存在不确定性。
 - 生产继续禁用 Flyway 时，每次新增 OpenClaw 表或字段都必须手动执行并验证 MySQL 结构。
 - 不要把草稿测试结果持久化为正式 Agent/Skill；正式发布仍应走后续独立 Publish/Review 流程。
+
+## 2026-06-22 - Skill Draft Versioning 与回滚验收
+
+### 本次实现范围
+
+- 功能提交：`04c0136f feat(openclaw): add skill draft versioning`。
+- 修复提交：`71c7f630 fix(openclaw): allow rollback after passed draft test`。
+- 服务器 `116.204.135.83` 已部署到 `71c7f630`。
+- 生产环境 Flyway 仍禁用，本次 MySQL 迁移已手动执行；PostgreSQL 迁移脚本已同步维护但未在当前 MySQL 生产库执行。
+
+### 设计与实现
+
+- 新增 `openclaw_skill_draft_version` 表，保存完整文件快照、目录 hash、来源类型、关联 AI record、关联 Test run、Lint/Test 状态。
+- `sourceType` 当前支持：`manual`、`ai_edit`、`ai_repair`、`rollback`。
+- 手动保存、新建、删除文件都会生成 manual version。
+- AI Edit apply 生成 `ai_edit` version，并关联 `openclaw_skill_ai_edit_record.id`。
+- AI Repair apply 生成 `ai_repair` version，并关联 repair record 与失败 `testRunId`。
+- rollback 会把目标 version 的文件快照恢复到当前草稿，并生成新的 `rollback` version；rollback 后清空当前草稿的 Lint/Test 状态，要求重新 Lint/Test。
+- Test run 绑定测试开始时的 `draftVersionNo` 与 `fileHash`；Test 完成后回写对应 version 的 `testStatus`，Lint 会回写最新匹配文件 hash 的 version 的 `lintStatus`。
+- 提交审核前要求最新 version 同时满足 `lintStatus=lint_passed` 且 `testStatus=success`。
+- `test_passed` 已加入草稿可编辑状态白名单，否则测试通过后的版本回滚会被状态校验挡住。
+
+### 新增接口
+
+- `GET /openclaw/skill/draft/{draftId}/versions`：版本列表，返回 versionNo、sourceType、summary、lintStatus、testStatus、createdBy、createdTime。
+- `GET /openclaw/skill/draft/{draftId}/versions/{versionNo}`：版本详情，返回文件快照、关联 AI record、关联 Test Report。
+- `GET /openclaw/skill/draft/{draftId}/versions/diff?fromVersionNo=&toVersionNo=`：文件级 diff；缺省一端表示当前草稿。
+- `POST /openclaw/skill/draft/{draftId}/versions/{versionNo}/rollback`：回滚到历史版本并生成新版本。
+
+### 验收结果
+
+- 本地后端编译通过：`mvn -pl jeecg-boot-module/jeecg-module-demo -am -DskipTests compile`。
+- 本地前端 build 通过：`pnpm build`。
+- 服务器后端 package 通过。
+- 服务器前端 build 首次遇到既有 Less timeout，重试通过。
+- 手动验证生产 MySQL 已存在 `openclaw_skill_draft_version` 表，以及 `openclaw_skill_test_run.draft_version_no/file_hash` 字段。
+- 服务器验收脚本 `scripts/openclaw_skill_draft_closed_loop_acceptance.py` 结果：`success=true`。
+
+关键链路：
+
+- Echo 草稿连续 5 次手动保存生成 5 个 manual version。
+- Lint passed 后最新 version 回写 `lintStatus=lint_passed`。
+- Test passed 后 Test Report 返回 `draftVersionNo=5`，version 详情包含文件快照和 Test Report，最新 version 回写 `testStatus=success`。
+- 当前草稿与 v1 diff 返回 4 个文件级变化。
+- 回滚到 v1 成功并生成 v6，`sourceType=rollback`，回滚后重新 Lint passed。
+- 发票 AI Edit 链路、失败 Test + AI Repair 链路仍通过。
+- Gateway 日志未发现 `unknown agent id`、`1006`、`abnormal`、`FailoverError`。
+
+### 后续审核发布流待办
+
+- 增加“选择已通过版本提交审核”的显式接口与 UI，而不是仅提交当前最新版本。
+- 审核页需要展示提交版本的固定快照、diff、Test Report 和 AI record。
+- 发布时应从审核通过的 version 快照发布，而不是重新读取可变草稿目录。
+- 需要定义发布后版本归档、审计记录和回滚到已发布版本的权限边界。
