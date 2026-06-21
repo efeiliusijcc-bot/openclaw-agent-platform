@@ -41,6 +41,10 @@ export const runSkillDraftTest = (id: string, params) => defHttp.post({ url: `/o
 export const runSkillDraftBatchTests = (id: string, params) => defHttp.post({ url: `/openclaw/skill/draft/${id}/tests/run`, params, timeout: 10 * 90 * 1000 });
 export const listSkillDraftTests = (id: string, params) => defHttp.get({ url: `/openclaw/skill/draft/${id}/tests`, params });
 export const getSkillDraftTestReport = (id: string, testRunId: string) => defHttp.get({ url: `/openclaw/skill/draft/${id}/tests/${testRunId}/report` });
+export const listSkillDraftVersions = (id: string) => defHttp.get({ url: `/openclaw/skill/draft/${id}/versions` });
+export const getSkillDraftVersion = (id: string, versionNo: number) => defHttp.get({ url: `/openclaw/skill/draft/${id}/versions/${versionNo}` });
+export const diffSkillDraftVersion = (id: string, params) => defHttp.get({ url: `/openclaw/skill/draft/${id}/versions/diff`, params });
+export const rollbackSkillDraftVersion = (id: string, versionNo: number) => defHttp.post({ url: `/openclaw/skill/draft/${id}/versions/${versionNo}/rollback` });
 export const repairSkillDraft = (id: string, params) => defHttp.post({ url: `/openclaw/skill/draft/${id}/repair`, params, timeout: 120 * 1000 });
 export const applySkillDraftRepair = (id: string, params) => defHttp.post({ url: `/openclaw/skill/draft/${id}/repair/apply`, params });
 export const previewSkillDraftAiEdit = (id: string, params) =>

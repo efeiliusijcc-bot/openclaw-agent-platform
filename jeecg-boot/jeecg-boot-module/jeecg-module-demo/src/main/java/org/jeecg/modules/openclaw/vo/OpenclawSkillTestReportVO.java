@@ -11,6 +11,8 @@ public class OpenclawSkillTestReportVO {
     private String testRunId;
     private String draftId;
     private String agentKey;
+    private Integer draftVersionNo;
+    private String fileHash;
     private String status;
     private String lintStatus;
     private String gatewayStatus;

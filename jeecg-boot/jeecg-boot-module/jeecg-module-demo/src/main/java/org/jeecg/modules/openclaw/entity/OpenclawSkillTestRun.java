@@ -31,6 +31,8 @@ public class OpenclawSkillTestRun extends JeecgEntity implements Serializable {
     private String inputJson;
     private String outputJson;
     private String outputSummary;
+    private Integer draftVersionNo;
+    private String fileHash;
     private String errorType;
     private String errorCode;
     private String errorMessage;

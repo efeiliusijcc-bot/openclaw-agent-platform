@@ -19,6 +19,7 @@ import org.jeecg.modules.openclaw.vo.OpenclawSkillDraftLintVO;
 import org.jeecg.modules.openclaw.vo.OpenclawSkillAiEditVO;
 import org.jeecg.modules.openclaw.vo.OpenclawSkillRepairVO;
 import org.jeecg.modules.openclaw.vo.OpenclawSkillTestReportVO;
+import org.jeecg.modules.openclaw.vo.OpenclawSkillDraftVersionVO;
 
 import java.util.List;
 
@@ -48,6 +49,14 @@ public interface IOpenclawSkillDraftService extends IService<OpenclawSkillDraft>
     List<OpenclawSkillTestRun> runBatchTests(String draftId, OpenclawSkillDraftBatchTestDTO dto);
 
     OpenclawSkillTestReportVO testReport(String draftId, String testRunId);
+
+    List<OpenclawSkillDraftVersionVO> versions(String draftId);
+
+    OpenclawSkillDraftVersionVO versionDetail(String draftId, Integer versionNo);
+
+    OpenclawSkillDraftVersionVO diffVersion(String draftId, Integer fromVersionNo, Integer toVersionNo);
+
+    OpenclawSkillDraftVersionVO rollbackVersion(String draftId, Integer versionNo);
 
     OpenclawSkillRepairVO repairDraft(String draftId, OpenclawSkillRepairDTO dto);
 

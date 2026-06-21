@@ -26,12 +26,14 @@ import org.jeecg.modules.openclaw.entity.OpenclawSkill;
 import org.jeecg.modules.openclaw.entity.OpenclawSkillAiEditRecord;
 import org.jeecg.modules.openclaw.entity.OpenclawSkillDraft;
 import org.jeecg.modules.openclaw.entity.OpenclawSkillDraftFile;
+import org.jeecg.modules.openclaw.entity.OpenclawSkillDraftVersion;
 import org.jeecg.modules.openclaw.entity.OpenclawSkillTestRun;
 import org.jeecg.modules.openclaw.entity.OpenclawWorkspace;
 import org.jeecg.modules.openclaw.mapper.OpenclawGatewayNodeMapper;
 import org.jeecg.modules.openclaw.mapper.OpenclawSkillAiEditRecordMapper;
 import org.jeecg.modules.openclaw.mapper.OpenclawSkillDraftFileMapper;
 import org.jeecg.modules.openclaw.mapper.OpenclawSkillDraftMapper;
+import org.jeecg.modules.openclaw.mapper.OpenclawSkillDraftVersionMapper;
 import org.jeecg.modules.openclaw.mapper.OpenclawWorkspaceMapper;
 import org.jeecg.modules.openclaw.service.IOpenclawAgentRunService;
 import org.jeecg.modules.openclaw.service.IOpenclawAuditLogService;
@@ -44,6 +46,7 @@ import org.jeecg.modules.openclaw.vo.OpenclawSkillAiEditVO;
 import org.jeecg.modules.openclaw.vo.OpenclawSkillDraftFileContentVO;
 import org.jeecg.modules.openclaw.vo.OpenclawSkillDraftFileNodeVO;
 import org.jeecg.modules.openclaw.vo.OpenclawSkillDraftLintVO;
+import org.jeecg.modules.openclaw.vo.OpenclawSkillDraftVersionVO;
 import org.jeecg.modules.openclaw.vo.OpenclawSkillRepairVO;
 import org.jeecg.modules.openclaw.vo.OpenclawSkillTestReportVO;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -115,6 +118,8 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
     private OpenclawSkillAiEditRecordMapper aiEditRecordMapper;
     @Autowired
     private SkillAiEditValidator skillAiEditValidator;
+    @Autowired
+    private OpenclawSkillDraftVersionMapper draftVersionMapper;
 
     @Value("${openclaw.skill.ai.base-url:${OPENCLAW_SKILL_AI_BASE_URL:}}")
     private String skillAiBaseUrl;
@@ -305,6 +310,7 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
         try {
             Files.write(file, data, StandardOpenOption.TRUNCATE_EXISTING);
             scanFiles(draft);
+            createDraftVersion(draft, "manual", null, null, "Manual save: " + dto.getPath(), true);
             auditLogService.log("skill_draft_file_update", "skill_draft", draft.getId(), Map.of("path", dto.getPath()));
             return readFile(draftId, dto.getPath());
         } catch (IOException e) {
@@ -334,6 +340,7 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
                 Files.write(target, data, StandardOpenOption.CREATE_NEW);
             }
             scanFiles(draft);
+            createDraftVersion(draft, "manual", null, null, "Manual create: " + dto.getPath(), true);
             auditLogService.log("skill_draft_file_create", "skill_draft", draft.getId(), Map.of("path", dto.getPath(), "directory", Boolean.TRUE.equals(dto.getDirectory())));
         } catch (IOException e) {
             throw new JeecgBootException("Create draft file failed: " + e.getMessage(), e);
@@ -362,6 +369,7 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
                 Files.deleteIfExists(target);
             }
             scanFiles(draft);
+            createDraftVersion(draft, "manual", null, null, "Manual delete: " + path, true);
             auditLogService.log("skill_draft_file_delete", "skill_draft", draft.getId(), Map.of("path", path));
         } catch (IOException e) {
             throw new JeecgBootException("Delete draft file failed: " + e.getMessage(), e);
@@ -386,6 +394,7 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
             draft.setLastLintStatus(result.getStatus());
             draft.setLastLintResultJson(JSON.toJSONString(result));
             updateById(draft);
+            updateVersionLintStatus(draft, result.getStatus());
             auditLogService.log(Boolean.TRUE.equals(result.getPassed()) ? "skill_draft_lint" : "skill_draft_lint_failed", "skill_draft", draft.getId(), result);
             return result;
         } catch (IOException e) {
@@ -405,6 +414,7 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
         }
         LoginUser user = permissionService.currentUser();
         Date start = new Date();
+        OpenclawSkillDraftVersion version = ensureCurrentDraftVersion(draft, "manual", "Test snapshot");
         OpenclawSkillTestRun run = new OpenclawSkillTestRun();
         run.setDraftId(draft.getId());
         run.setSkillSlug(draft.getSkillSlug());
@@ -414,6 +424,8 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
         run.setPrompt(trim(dto.getPrompt(), 8000));
         run.setExpectedOutput(trim(dto.getExpectedOutput(), 4000));
         run.setInputJson(testInputJson(dto));
+        run.setDraftVersionNo(version.getVersionNo());
+        run.setFileHash(version.getFileHash());
         run.setGatewayStatus("PENDING");
         run.setStartTime(start);
         run.setDelFlag(OpenclawConstants.DEL_FLAG_NORMAL);
@@ -428,6 +440,7 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
                 draft.setLastTestStatus(OpenclawConstants.RUN_STATUS_FAILED);
                 draft.setLastTestRunId(run.getId());
                 updateById(draft);
+                updateVersionTestStatus(draft, run, OpenclawConstants.RUN_STATUS_FAILED);
                 updateLatestAppliedRepairStatus(draft, OpenclawConstants.RUN_STATUS_FAILED);
                 auditLogService.logFailure("skill_draft_test_failed", "skill_test_run", run.getId(), run);
                 return run;
@@ -455,6 +468,7 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
             draft.setLastTestStatus(status);
             draft.setLastTestRunId(run.getId());
             updateById(draft);
+            updateVersionTestStatus(draft, run, status);
             updateLatestAppliedRepairStatus(draft, status);
             if (OpenclawConstants.RUN_STATUS_SUCCESS.equals(status)) {
                 auditLogService.logSuccess("skill_draft_test_success", "skill_test_run", run.getId(), run);
@@ -468,6 +482,7 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
             draft.setLastTestStatus(OpenclawConstants.RUN_STATUS_FAILED);
             draft.setLastTestRunId(run.getId());
             updateById(draft);
+            updateVersionTestStatus(draft, run, OpenclawConstants.RUN_STATUS_FAILED);
             updateLatestAppliedRepairStatus(draft, OpenclawConstants.RUN_STATUS_FAILED);
             auditLogService.logFailure("skill_draft_test_failed", "skill_test_run", run.getId(), run);
             return run;
@@ -511,6 +526,68 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
             throw new JeecgBootException("Test run does not belong to this draft.");
         }
         return toTestReport(run);
+    }
+
+    @Override
+    public List<OpenclawSkillDraftVersionVO> versions(String draftId) {
+        OpenclawSkillDraft draft = requireDraft(draftId, false);
+        return draftVersionMapper.selectList(new LambdaQueryWrapper<OpenclawSkillDraftVersion>()
+                .eq(OpenclawSkillDraftVersion::getDraftId, draft.getId())
+                .eq(OpenclawSkillDraftVersion::getDelFlag, OpenclawConstants.DEL_FLAG_NORMAL)
+                .orderByDesc(OpenclawSkillDraftVersion::getVersionNo))
+            .stream()
+            .map(version -> toVersionVO(version, false))
+            .toList();
+    }
+
+    @Override
+    public OpenclawSkillDraftVersionVO versionDetail(String draftId, Integer versionNo) {
+        OpenclawSkillDraft draft = requireDraft(draftId, false);
+        OpenclawSkillDraftVersion version = requireDraftVersion(draft, versionNo);
+        OpenclawSkillDraftVersionVO vo = toVersionVO(version, true);
+        if (StringUtils.hasText(version.getSourceRecordId())) {
+            vo.setSourceRecord(aiEditRecordMapper.selectById(version.getSourceRecordId()));
+        }
+        if (StringUtils.hasText(version.getTestRunId())) {
+            OpenclawSkillTestRun run = testRunService.getById(version.getTestRunId());
+            if (run != null && draft.getId().equals(run.getDraftId())) {
+                vo.setTestReport(toTestReport(run));
+            }
+        }
+        return vo;
+    }
+
+    @Override
+    public OpenclawSkillDraftVersionVO diffVersion(String draftId, Integer fromVersionNo, Integer toVersionNo) {
+        OpenclawSkillDraft draft = requireDraft(draftId, false);
+        Map<String, String> before = fromVersionNo == null ? readCurrentFileSnapshot(draft) : parseFileSnapshot(requireDraftVersion(draft, fromVersionNo).getFileSnapshot());
+        Map<String, String> after = toVersionNo == null ? readCurrentFileSnapshot(draft) : parseFileSnapshot(requireDraftVersion(draft, toVersionNo).getFileSnapshot());
+        OpenclawSkillDraftVersionVO vo = new OpenclawSkillDraftVersionVO();
+        vo.setDraftId(draft.getId());
+        vo.setVersionNo(toVersionNo);
+        vo.setSummary((fromVersionNo == null ? "current" : "v" + fromVersionNo) + " -> " + (toVersionNo == null ? "current" : "v" + toVersionNo));
+        vo.setDiffs(fileDiffs(before, after));
+        return vo;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public OpenclawSkillDraftVersionVO rollbackVersion(String draftId, Integer versionNo) {
+        OpenclawSkillDraft draft = requireDraft(draftId, true);
+        OpenclawSkillDraftVersion source = requireDraftVersion(draft, versionNo);
+        Path root = draftRoot(draft);
+        try {
+            restoreSnapshot(root, parseFileSnapshot(source.getFileSnapshot()));
+            scanFiles(draft);
+            OpenclawSkillDraftVersion rollback = createDraftVersion(draft, "rollback", source.getId(), source.getTestRunId(), "Rollback to version " + source.getVersionNo(), true);
+            auditLogService.logSuccess("skill_draft_version_rollback", "skill_draft", draft.getId(), Map.of(
+                "fromVersionNo", source.getVersionNo(),
+                "newVersionNo", rollback.getVersionNo()
+            ));
+            return toVersionVO(rollback, true);
+        } catch (IOException e) {
+            throw new JeecgBootException("Rollback Skill draft version failed: " + e.getMessage(), e);
+        }
     }
 
     @Override
@@ -641,6 +718,7 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
             skillAiEditValidator.validateFiles(files, root);
             List<OpenclawSkillRepairVO.FileSuggestion> applied = applySuggestionFiles(root, files);
             scanFiles(draft);
+            createDraftVersion(draft, "ai_edit", record.getId(), record.getTestRunId(), firstText(record.getSummary(), "AI Edit apply"), true);
             record.setStatus("APPLIED");
             record.setAppliedTime(new Date());
             record.setErrorMessage(null);
@@ -696,6 +774,7 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
                 throw new JeecgBootException("No repair file can be applied.");
             }
             scanFiles(draft);
+            createDraftVersion(draft, "ai_repair", record.getId(), record.getTestRunId(), firstText(record.getSummary(), "AI Repair apply"), true);
             record.setStatus("APPLIED");
             record.setAppliedTime(new Date());
             record.setRepairAfterStatus(draft.getLastTestStatus());
@@ -752,6 +831,12 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
             .eq(OpenclawSkillTestRun::getDelFlag, OpenclawConstants.DEL_FLAG_NORMAL));
         if (successTestCount == null || successTestCount < 1 || !OpenclawConstants.RUN_STATUS_SUCCESS.equals(draft.getLastTestStatus())) {
             throw new JeecgBootException("At least one successful test run is required before submit.");
+        }
+        OpenclawSkillDraftVersion latestVersion = latestDraftVersion(draft);
+        if (latestVersion == null
+            || !"lint_passed".equals(latestVersion.getLintStatus())
+            || !OpenclawConstants.RUN_STATUS_SUCCESS.equals(latestVersion.getTestStatus())) {
+            throw new JeecgBootException("Only a version with lint passed and test passed can be submitted.");
         }
 
         draft.setStatus("submitted");
@@ -856,6 +941,205 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
             throw new JeecgBootException("Current draft status does not allow editing.");
         }
         return draft;
+    }
+
+    private OpenclawSkillDraftVersion createDraftVersion(OpenclawSkillDraft draft, String sourceType, String sourceRecordId, String testRunId, String summary, boolean resetValidation) {
+        try {
+            LoginUser user = permissionService.currentUser();
+            OpenclawSkillDraftVersion latest = latestDraftVersion(draft);
+            OpenclawSkillDraftVersion version = new OpenclawSkillDraftVersion();
+            version.setId(IdWorker.getIdStr());
+            version.setDraftId(draft.getId());
+            version.setVersionNo(latest == null ? 1 : latest.getVersionNo() + 1);
+            version.setSourceType(sourceType);
+            version.setSourceRecordId(sourceRecordId);
+            version.setTestRunId(testRunId);
+            version.setFileSnapshot(JSON.toJSONString(readCurrentFileSnapshot(draft)));
+            version.setFileHash(sha256Directory(draftRoot(draft)));
+            version.setSummary(trim(summary, 1000));
+            version.setLintStatus(resetValidation ? null : draft.getLastLintStatus());
+            version.setTestStatus(resetValidation ? null : draft.getLastTestStatus());
+            version.setCreateBy(user == null ? null : user.getUsername());
+            version.setCreateTime(new Date());
+            version.setDelFlag(OpenclawConstants.DEL_FLAG_NORMAL);
+            draftVersionMapper.insert(version);
+            if (resetValidation) {
+                draft.setStatus("editing");
+                draft.setLastLintStatus(null);
+                draft.setLastLintResultJson(null);
+                draft.setLastTestStatus(null);
+                draft.setLastTestRunId(null);
+                updateById(draft);
+            }
+            return version;
+        } catch (IOException e) {
+            throw new JeecgBootException("Create Skill draft version failed: " + e.getMessage(), e);
+        }
+    }
+
+    private OpenclawSkillDraftVersion ensureCurrentDraftVersion(OpenclawSkillDraft draft, String sourceType, String summary) {
+        try {
+            OpenclawSkillDraftVersion latest = latestDraftVersion(draft);
+            String currentHash = sha256Directory(draftRoot(draft));
+            if (latest != null && currentHash.equals(latest.getFileHash())) {
+                return latest;
+            }
+            return createDraftVersion(draft, sourceType, null, null, summary, false);
+        } catch (IOException e) {
+            throw new JeecgBootException("Ensure Skill draft version failed: " + e.getMessage(), e);
+        }
+    }
+
+    private OpenclawSkillDraftVersion latestDraftVersion(OpenclawSkillDraft draft) {
+        return draftVersionMapper.selectOne(new LambdaQueryWrapper<OpenclawSkillDraftVersion>()
+            .eq(OpenclawSkillDraftVersion::getDraftId, draft.getId())
+            .eq(OpenclawSkillDraftVersion::getDelFlag, OpenclawConstants.DEL_FLAG_NORMAL)
+            .orderByDesc(OpenclawSkillDraftVersion::getVersionNo)
+            .last("limit 1"));
+    }
+
+    private OpenclawSkillDraftVersion requireDraftVersion(OpenclawSkillDraft draft, Integer versionNo) {
+        if (versionNo == null || versionNo < 1) {
+            throw new JeecgBootException("Version number is required.");
+        }
+        OpenclawSkillDraftVersion version = draftVersionMapper.selectOne(new LambdaQueryWrapper<OpenclawSkillDraftVersion>()
+            .eq(OpenclawSkillDraftVersion::getDraftId, draft.getId())
+            .eq(OpenclawSkillDraftVersion::getVersionNo, versionNo)
+            .eq(OpenclawSkillDraftVersion::getDelFlag, OpenclawConstants.DEL_FLAG_NORMAL)
+            .last("limit 1"));
+        if (version == null) {
+            throw new JeecgBootException("Skill draft version does not exist.");
+        }
+        return version;
+    }
+
+    private void updateVersionLintStatus(OpenclawSkillDraft draft, String lintStatus) {
+        try {
+            OpenclawSkillDraftVersion version = latestDraftVersion(draft);
+            if (version == null) {
+                version = createDraftVersion(draft, "manual", null, null, "Lint snapshot", false);
+            }
+            String currentHash = sha256Directory(draftRoot(draft));
+            if (!currentHash.equals(version.getFileHash())) {
+                version = createDraftVersion(draft, "manual", null, null, "Lint snapshot", false);
+            }
+            version.setLintStatus(lintStatus);
+            draftVersionMapper.updateById(version);
+        } catch (IOException e) {
+            throw new JeecgBootException("Update Skill draft version lint status failed: " + e.getMessage(), e);
+        }
+    }
+
+    private void updateVersionTestStatus(OpenclawSkillDraft draft, OpenclawSkillTestRun run, String status) {
+        if (run == null || run.getDraftVersionNo() == null) {
+            return;
+        }
+        OpenclawSkillDraftVersion version = requireDraftVersion(draft, run.getDraftVersionNo());
+        if (StringUtils.hasText(run.getFileHash()) && !run.getFileHash().equals(version.getFileHash())) {
+            return;
+        }
+        version.setTestRunId(run.getId());
+        version.setTestStatus(status);
+        if (StringUtils.hasText(run.getLintStatus())) {
+            version.setLintStatus(run.getLintStatus());
+        }
+        draftVersionMapper.updateById(version);
+    }
+
+    private OpenclawSkillDraftVersionVO toVersionVO(OpenclawSkillDraftVersion version, boolean includeFiles) {
+        OpenclawSkillDraftVersionVO vo = new OpenclawSkillDraftVersionVO();
+        vo.setId(version.getId());
+        vo.setDraftId(version.getDraftId());
+        vo.setVersionNo(version.getVersionNo());
+        vo.setSourceType(version.getSourceType());
+        vo.setSourceRecordId(version.getSourceRecordId());
+        vo.setTestRunId(version.getTestRunId());
+        vo.setFileHash(version.getFileHash());
+        vo.setSummary(version.getSummary());
+        vo.setLintStatus(version.getLintStatus());
+        vo.setTestStatus(version.getTestStatus());
+        vo.setCreatedBy(version.getCreateBy());
+        vo.setCreatedTime(version.getCreateTime());
+        if (includeFiles) {
+            vo.setFiles(parseFileSnapshot(version.getFileSnapshot()));
+        }
+        return vo;
+    }
+
+    private Map<String, String> readCurrentFileSnapshot(OpenclawSkillDraft draft) {
+        try {
+            Map<String, String> files = new LinkedHashMap<>();
+            Path root = draftRoot(draft);
+            try (var walk = Files.walk(root)) {
+                for (Path item : walk.sorted().toList()) {
+                    pathSafetyService.rejectIfOutsideRoot(root, item);
+                    if (!Files.isRegularFile(item)) {
+                        continue;
+                    }
+                    String relative = toRelative(root, item);
+                    pathSafetyService.rejectBlockedExtension(relative);
+                    pathSafetyService.rejectOversized(item);
+                    files.put(relative, Files.readString(item, StandardCharsets.UTF_8));
+                }
+            }
+            return files;
+        } catch (IOException e) {
+            throw new JeecgBootException("Read Skill draft snapshot failed: " + e.getMessage(), e);
+        }
+    }
+
+    private Map<String, String> parseFileSnapshot(String snapshot) {
+        Map<String, String> files = new LinkedHashMap<>();
+        if (!StringUtils.hasText(snapshot)) {
+            return files;
+        }
+        JSONObject json = JSON.parseObject(snapshot);
+        for (String key : json.keySet()) {
+            if (StringUtils.hasText(key)) {
+                files.put(key, json.getString(key));
+            }
+        }
+        return files;
+    }
+
+    private List<OpenclawSkillDraftVersionVO.FileDiff> fileDiffs(Map<String, String> before, Map<String, String> after) {
+        List<OpenclawSkillDraftVersionVO.FileDiff> diffs = new ArrayList<>();
+        Set<String> paths = new java.util.TreeSet<>();
+        paths.addAll(before.keySet());
+        paths.addAll(after.keySet());
+        for (String path : paths) {
+            String oldContent = before.get(path);
+            String newContent = after.get(path);
+            if (oldContent == null) {
+                diffs.add(fileDiff(path, "added", null, sha256Text(newContent)));
+            } else if (newContent == null) {
+                diffs.add(fileDiff(path, "deleted", sha256Text(oldContent), null));
+            } else if (!oldContent.equals(newContent)) {
+                diffs.add(fileDiff(path, "modified", sha256Text(oldContent), sha256Text(newContent)));
+            }
+        }
+        return diffs;
+    }
+
+    private OpenclawSkillDraftVersionVO.FileDiff fileDiff(String path, String changeType, String beforeHash, String afterHash) {
+        OpenclawSkillDraftVersionVO.FileDiff diff = new OpenclawSkillDraftVersionVO.FileDiff();
+        diff.setPath(path);
+        diff.setChangeType(changeType);
+        diff.setBeforeHash(beforeHash);
+        diff.setAfterHash(afterHash);
+        return diff;
+    }
+
+    private void restoreSnapshot(Path root, Map<String, String> files) throws IOException {
+        cleanupDraftFiles(root);
+        for (Map.Entry<String, String> entry : files.entrySet()) {
+            byte[] data = (entry.getValue() == null ? "" : entry.getValue()).getBytes(StandardCharsets.UTF_8);
+            pathSafetyService.validateWritableFile(root, entry.getKey(), data.length);
+            Path target = pathSafetyService.resolve(root, entry.getKey());
+            pathSafetyService.rejectIfOutsideRoot(root, target);
+            Files.createDirectories(target.getParent());
+            Files.write(target, data, StandardOpenOption.CREATE_NEW);
+        }
     }
 
     private OpenclawSkillDraft requireReviewableDraft(String draftId) {
@@ -1939,6 +2223,8 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
         report.setTestRunId(run.getId());
         report.setDraftId(run.getDraftId());
         report.setAgentKey(run.getAgentKey());
+        report.setDraftVersionNo(run.getDraftVersionNo());
+        report.setFileHash(run.getFileHash());
         report.setStatus(standardTestStatus(run.getStatus()));
         report.setLintStatus(run.getLintStatus());
         report.setGatewayStatus(run.getGatewayStatus());
@@ -2083,6 +2369,20 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
 
     private String safeText(String value) {
         return value == null ? "" : value;
+    }
+
+    private String sha256Text(String value) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] bytes = digest.digest((value == null ? "" : value).getBytes(StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder();
+            for (byte b : bytes) {
+                sb.append(String.format("%02x", b));
+            }
+            return sb.toString();
+        } catch (NoSuchAlgorithmException e) {
+            throw new JeecgBootException("Current JDK does not support SHA-256.", e);
+        }
     }
 
     private String sha256Directory(Path root) throws IOException {

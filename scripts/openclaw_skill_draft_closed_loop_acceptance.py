@@ -136,9 +136,30 @@ No file, network, credential, database, or shell access is required.
     for path, content in files.items():
         status, response = save_file(draft_id, token, path, content)
         results.append({"step": "echo-save-file", "path": path, "http": status, "success": ok(response)})
+    status, versions = request("GET", f"/openclaw/skill/draft/{draft_id}/versions", token=token)
+    version_rows = (versions or {}).get("result") or []
+    latest_version = version_rows[0] if version_rows else {}
+    first_version_no = version_rows[-1].get("versionNo") if version_rows else None
+    results.append({
+        "step": "echo-version-list-after-save",
+        "http": status,
+        "success": ok(versions) and len(version_rows) >= len(files),
+        "count": len(version_rows),
+        "latestVersionNo": latest_version.get("versionNo"),
+        "latestSource": latest_version.get("sourceType"),
+    })
     status, lint = request("POST", f"/openclaw/skill/draft/{draft_id}/lint", token=token)
     lint_result = (lint or {}).get("result") or {}
     results.append({"step": "echo-lint", "http": status, "success": ok(lint), "passed": lint_result.get("passed"), "status": lint_result.get("status")})
+    status, versions_after_lint = request("GET", f"/openclaw/skill/draft/{draft_id}/versions", token=token)
+    latest_after_lint = (((versions_after_lint or {}).get("result") or [{}])[0] or {})
+    results.append({
+        "step": "echo-version-lint-bound",
+        "http": status,
+        "success": ok(versions_after_lint) and latest_after_lint.get("lintStatus") == "lint_passed",
+        "versionNo": latest_after_lint.get("versionNo"),
+        "lintStatus": latest_after_lint.get("lintStatus"),
+    })
     expected = '{"text":"hello"}'
     status, test = request("POST", f"/openclaw/skill/draft/{draft_id}/test", {
         "prompt": expected,
@@ -151,7 +172,50 @@ No file, network, credential, database, or shell access is required.
     if test_run_id:
         status, report = request("GET", f"/openclaw/skill/draft/{draft_id}/tests/{test_run_id}/report", token=token)
         report_result = (report or {}).get("result") or {}
-        results.append({"step": "echo-report", "http": status, "success": ok(report), "status": report_result.get("status"), "lintStatus": report_result.get("lintStatus"), "gatewayStatus": report_result.get("gatewayStatus"), "agentKey": report_result.get("agentKey")})
+        results.append({"step": "echo-report", "http": status, "success": ok(report), "status": report_result.get("status"), "lintStatus": report_result.get("lintStatus"), "gatewayStatus": report_result.get("gatewayStatus"), "agentKey": report_result.get("agentKey"), "draftVersionNo": report_result.get("draftVersionNo")})
+        if report_result.get("draftVersionNo"):
+            status, detail = request("GET", f"/openclaw/skill/draft/{draft_id}/versions/{report_result.get('draftVersionNo')}", token=token)
+            detail_result = (detail or {}).get("result") or {}
+            results.append({
+                "step": "echo-version-detail",
+                "http": status,
+                "success": ok(detail) and bool(detail_result.get("files")) and bool(detail_result.get("testReport")),
+                "versionNo": detail_result.get("versionNo"),
+                "testStatus": detail_result.get("testStatus"),
+                "hasFiles": bool(detail_result.get("files")),
+                "hasReport": bool(detail_result.get("testReport")),
+            })
+    status, versions_after_test = request("GET", f"/openclaw/skill/draft/{draft_id}/versions", token=token)
+    latest_after_test = (((versions_after_test or {}).get("result") or [{}])[0] or {})
+    results.append({
+        "step": "echo-version-test-bound",
+        "http": status,
+        "success": ok(versions_after_test) and latest_after_test.get("testStatus") == "success",
+        "versionNo": latest_after_test.get("versionNo"),
+        "testStatus": latest_after_test.get("testStatus"),
+    })
+    if first_version_no:
+        status, diff = request("GET", f"/openclaw/skill/draft/{draft_id}/versions/diff?fromVersionNo={first_version_no}", token=token)
+        diff_result = (diff or {}).get("result") or {}
+        results.append({
+            "step": "echo-version-diff-current",
+            "http": status,
+            "success": ok(diff) and len(diff_result.get("diffs") or []) > 0,
+            "fromVersionNo": first_version_no,
+            "diffCount": len(diff_result.get("diffs") or []),
+        })
+        status, rollback = request("POST", f"/openclaw/skill/draft/{draft_id}/versions/{first_version_no}/rollback", token=token)
+        rollback_result = (rollback or {}).get("result") or {}
+        results.append({
+            "step": "echo-version-rollback",
+            "http": status,
+            "success": ok(rollback) and rollback_result.get("sourceType") == "rollback" and rollback_result.get("lintStatus") is None and rollback_result.get("testStatus") is None,
+            "rollbackVersionNo": rollback_result.get("versionNo"),
+            "sourceType": rollback_result.get("sourceType"),
+        })
+        status, relint = request("POST", f"/openclaw/skill/draft/{draft_id}/lint", token=token)
+        relint_result = (relint or {}).get("result") or {}
+        results.append({"step": "echo-version-rollback-lint", "http": status, "success": ok(relint), "passed": relint_result.get("passed")})
     return results
 
 

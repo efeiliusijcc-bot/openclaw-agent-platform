@@ -30,6 +30,7 @@ import org.jeecg.modules.openclaw.vo.OpenclawSkillDraftLintVO;
 import org.jeecg.modules.openclaw.vo.OpenclawSkillAiEditVO;
 import org.jeecg.modules.openclaw.vo.OpenclawSkillRepairVO;
 import org.jeecg.modules.openclaw.vo.OpenclawSkillTestReportVO;
+import org.jeecg.modules.openclaw.vo.OpenclawSkillDraftVersionVO;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -215,5 +216,31 @@ public class OpenclawSkillDraftController {
     @RequiresPermissions("openclaw:skill:draft:edit")
     public Result<OpenclawSkillTestReportVO> testReport(@PathVariable String id, @PathVariable String testRunId) {
         return Result.OK(draftService.testReport(id, testRunId));
+    }
+
+    @GetMapping("/{id}/versions")
+    @RequiresPermissions("openclaw:skill:draft:edit")
+    public Result<List<OpenclawSkillDraftVersionVO>> versions(@PathVariable String id) {
+        return Result.OK(draftService.versions(id));
+    }
+
+    @GetMapping("/{id}/versions/{versionNo}")
+    @RequiresPermissions("openclaw:skill:draft:edit")
+    public Result<OpenclawSkillDraftVersionVO> versionDetail(@PathVariable String id, @PathVariable Integer versionNo) {
+        return Result.OK(draftService.versionDetail(id, versionNo));
+    }
+
+    @GetMapping("/{id}/versions/diff")
+    @RequiresPermissions("openclaw:skill:draft:edit")
+    public Result<OpenclawSkillDraftVersionVO> versionDiff(@PathVariable String id,
+                                                           @RequestParam(required = false) Integer fromVersionNo,
+                                                           @RequestParam(required = false) Integer toVersionNo) {
+        return Result.OK(draftService.diffVersion(id, fromVersionNo, toVersionNo));
+    }
+
+    @PostMapping("/{id}/versions/{versionNo}/rollback")
+    @RequiresPermissions("openclaw:skill:draft:edit")
+    public Result<OpenclawSkillDraftVersionVO> rollbackVersion(@PathVariable String id, @PathVariable Integer versionNo) {
+        return Result.OK(draftService.rollbackVersion(id, versionNo));
     }
 }

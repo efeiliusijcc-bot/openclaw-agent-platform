@@ -87,6 +87,27 @@
             </a-tabs>
           </template>
         </a-card>
+        <a-card size="small" title="版本历史" class="version-card" :loading="versionLoading">
+          <a-space direction="vertical" style="width: 100%">
+            <a-button block preIcon="ant-design:reload-outlined" @click="loadVersions">刷新版本</a-button>
+            <a-empty v-if="!versions.length" description="暂无版本" />
+            <div v-for="item in versions" :key="item.id" class="version-item">
+              <div class="version-head">
+                <strong>v{{ item.versionNo }} · {{ item.sourceType }}</strong>
+                <span>{{ item.createdTime || '-' }}</span>
+              </div>
+              <div class="version-status">
+                Lint: {{ item.lintStatus || '-' }} / Test: {{ item.testStatus || '-' }}
+              </div>
+              <div class="version-summary">{{ item.summary || '-' }}</div>
+              <a-space>
+                <a-button size="small" @click="openVersionDetail(item.versionNo)">详情</a-button>
+                <a-button size="small" @click="openVersionDiff(item.versionNo)">Diff</a-button>
+                <a-button size="small" danger :disabled="!canEdit" @click="rollbackVersion(item.versionNo)">回滚</a-button>
+              </a-space>
+            </div>
+          </a-space>
+        </a-card>
         <a-card size="small" title="Lint 结果">
           <a-descriptions :column="1" size="small" bordered>
             <a-descriptions-item label="状态">{{ lintResult?.status || '-' }}</a-descriptions-item>
@@ -160,6 +181,43 @@
         </a-form-item>
       </a-form>
     </a-modal>
+
+    <a-modal v-model:open="versionDetailVisible" :title="selectedVersion ? `Version v${selectedVersion.versionNo}` : 'Version Detail'" width="920px" :footer="null" destroyOnClose>
+      <a-empty v-if="!selectedVersion" description="No version selected" />
+      <template v-else>
+        <a-descriptions :column="2" size="small" bordered>
+          <a-descriptions-item label="Source">{{ selectedVersion.sourceType }}</a-descriptions-item>
+          <a-descriptions-item label="Record">{{ selectedVersion.sourceRecordId || '-' }}</a-descriptions-item>
+          <a-descriptions-item label="Lint">{{ selectedVersion.lintStatus || '-' }}</a-descriptions-item>
+          <a-descriptions-item label="Test">{{ selectedVersion.testStatus || '-' }}</a-descriptions-item>
+          <a-descriptions-item label="Test Run">{{ selectedVersion.testRunId || '-' }}</a-descriptions-item>
+          <a-descriptions-item label="Hash">{{ selectedVersion.fileHash || '-' }}</a-descriptions-item>
+        </a-descriptions>
+        <a-tabs size="small" style="margin-top: 12px">
+          <a-tab-pane key="files" tab="Files">
+            <div v-for="(value, path) in selectedVersion.files || {}" :key="path" class="version-file">
+              <strong>{{ path }}</strong>
+              <pre class="report-pre">{{ value }}</pre>
+            </div>
+          </a-tab-pane>
+          <a-tab-pane key="record" tab="AI Record">
+            <pre class="report-pre">{{ selectedVersion.sourceRecord ? JSON.stringify(selectedVersion.sourceRecord, null, 2) : '-' }}</pre>
+          </a-tab-pane>
+          <a-tab-pane key="report" tab="Test Report">
+            <pre class="report-pre">{{ selectedVersion.testReport ? JSON.stringify(selectedVersion.testReport, null, 2) : '-' }}</pre>
+          </a-tab-pane>
+        </a-tabs>
+      </template>
+    </a-modal>
+
+    <a-modal v-model:open="versionDiffVisible" title="Version Diff" width="720px" :footer="null" destroyOnClose>
+      <a-empty v-if="!versionDiff?.diffs?.length" description="No file changes" />
+      <div v-for="item in versionDiff?.diffs || []" :key="item.path" class="version-diff-row">
+        <a-tag :color="item.changeType === 'added' ? 'green' : item.changeType === 'deleted' ? 'red' : 'blue'">{{ item.changeType }}</a-tag>
+        <strong>{{ item.path }}</strong>
+        <div class="version-status">{{ item.beforeHash || '-' }} -> {{ item.afterHash || '-' }}</div>
+      </div>
+    </a-modal>
   </div>
 </template>
 
@@ -175,16 +233,20 @@
     applySkillDraftRepair,
     createSkillDraftFile,
     deleteSkillDraftFile,
+    diffSkillDraftVersion,
     getSkillDraft,
     getSkillDraftTestReport,
     getSkillDraftTree,
+    getSkillDraftVersion,
     lintSkillDraft,
+    listSkillDraftVersions,
     listSkillDraftTests,
     publishSkillDraft,
     previewSkillDraftAiEdit,
     readSkillDraftFile,
     rejectSkillDraft,
     repairSkillDraft,
+    rollbackSkillDraftVersion,
     runSkillDraftBatchTests,
     runSkillDraftTest,
     saveSkillDraftFile,
@@ -220,6 +282,12 @@
   const createVisible = ref(false);
   const createDirectory = ref(false);
   const newPath = ref('');
+  const versions = ref<any[]>([]);
+  const versionLoading = ref(false);
+  const selectedVersion = ref<any>(null);
+  const versionDetailVisible = ref(false);
+  const versionDiff = ref<any>(null);
+  const versionDiffVisible = ref(false);
 
   const editorMode = computed(() => {
     if (currentPath.value.endsWith('.json')) return 'application/json';
@@ -238,6 +306,7 @@
     await loadDraft();
     await loadTree();
     await loadTestRuns();
+    await loadVersions();
   });
 
   async function loadDraft() {
@@ -279,6 +348,7 @@
     createMessage.success('已保存');
     await loadTree();
     await loadDraft();
+    await loadVersions();
   }
 
   function openCreateFile(directory: boolean) {
@@ -297,6 +367,8 @@
     await createSkillDraftFile(draftId.value, { path: newPath.value, directory: createDirectory.value, content: '' });
     createVisible.value = false;
     await loadTree();
+    await loadDraft();
+    await loadVersions();
   }
 
   function deleteCurrentFile() {
@@ -308,6 +380,8 @@
         currentPath.value = '';
         content.value = '';
         await loadTree();
+        await loadDraft();
+        await loadVersions();
       },
     });
   }
@@ -317,6 +391,7 @@
     lintResult.value = await lintSkillDraft(draftId.value);
     createMessage[lintResult.value.passed ? 'success' : 'warning'](lintResult.value.status);
     await loadDraft();
+    await loadVersions();
   }
 
   async function runTest() {
@@ -332,6 +407,7 @@
       await loadTestReport(result.id);
       await loadDraft();
       await loadTestRuns();
+      await loadVersions();
     } finally {
       testing.value = false;
     }
@@ -367,6 +443,7 @@
       batchVisible.value = false;
       await loadDraft();
       await loadTestRuns();
+      await loadVersions();
     } finally {
       batchTesting.value = false;
     }
@@ -458,6 +535,7 @@
       await loadDraft();
       await loadTree();
       await loadTestRuns();
+      await loadVersions();
       if (currentPath.value) {
         await onSelectFile([currentPath.value]);
       }
@@ -539,6 +617,48 @@
     } finally {
       reportLoading.value = false;
     }
+  }
+
+  async function loadVersions() {
+    versionLoading.value = true;
+    try {
+      versions.value = await listSkillDraftVersions(draftId.value);
+    } finally {
+      versionLoading.value = false;
+    }
+  }
+
+  async function openVersionDetail(versionNo: number) {
+    selectedVersion.value = await getSkillDraftVersion(draftId.value, versionNo);
+    versionDetailVisible.value = true;
+  }
+
+  async function openVersionDiff(versionNo: number) {
+    versionDiff.value = await diffSkillDraftVersion(draftId.value, { fromVersionNo: versionNo });
+    versionDiffVisible.value = true;
+  }
+
+  function rollbackVersion(versionNo: number) {
+    if (!canEdit.value) return;
+    Modal.confirm({
+      title: `回滚到 v${versionNo}?`,
+      content: '回滚会生成一个新的版本，之后需要重新运行 Lint 和 Test。',
+      onOk: async () => {
+        const result = await rollbackSkillDraftVersion(draftId.value, versionNo);
+        createMessage.success(`已回滚并生成 v${result.versionNo}，请重新运行 Lint/Test`);
+        versionDetailVisible.value = false;
+        versionDiffVisible.value = false;
+        await loadDraft();
+        await loadTree();
+        await loadVersions();
+        if (currentPath.value) {
+          await onSelectFile([currentPath.value]).catch(() => {
+            currentPath.value = '';
+            content.value = '';
+          });
+        }
+      },
+    });
   }
 
   function goBack() {
@@ -643,6 +763,37 @@
   }
 
   .test-report-card {
+    margin-bottom: 12px;
+  }
+
+  .version-card {
+    margin-bottom: 12px;
+  }
+
+  .version-item {
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    padding: 8px;
+    background: #fff;
+  }
+
+  .version-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 12px;
+  }
+
+  .version-status,
+  .version-summary {
+    margin: 4px 0;
+    color: #595959;
+    font-size: 12px;
+    word-break: break-word;
+  }
+
+  .version-file,
+  .version-diff-row {
     margin-bottom: 12px;
   }
 
