@@ -297,7 +297,7 @@
     return 'text/plain';
   });
   const hasLintMessages = computed(() => (lintResult.value?.errors?.length || 0) > 0 || (lintResult.value?.warnings?.length || 0) > 0);
-  const canEdit = computed(() => ['editing', 'lint_failed', 'lint_passed', 'test_failed', 'rejected'].includes(draft.value?.status));
+  const canEdit = computed(() => ['editing', 'lint_failed', 'lint_passed', 'test_failed', 'test_passed', 'rejected'].includes(draft.value?.status));
   const canReview = computed(() => draft.value?.status === 'submitted');
   const canPublish = computed(() => draft.value?.status === 'approved');
   const canSubmit = computed(() => canEdit.value && draft.value?.lastTestStatus === 'success');

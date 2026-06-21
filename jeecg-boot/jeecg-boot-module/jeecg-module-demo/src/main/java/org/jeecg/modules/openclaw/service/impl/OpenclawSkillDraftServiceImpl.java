@@ -87,7 +87,7 @@ import java.util.UUID;
 public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraftMapper, OpenclawSkillDraft> implements IOpenclawSkillDraftService {
     private static final String DRAFT_ROOT = "/data/openclaw-platform/skill-drafts";
     private static final String TEST_WORKSPACE_ROOT = OpenclawConstants.WORKSPACE_ROOT + "/skill-draft-tests";
-    private static final Set<String> EDITABLE_STATUSES = Set.of("editing", "lint_failed", "lint_passed", "test_failed", "rejected");
+    private static final Set<String> EDITABLE_STATUSES = Set.of("editing", "lint_failed", "lint_passed", "test_failed", "test_passed", "rejected");
     private static final Set<String> REVIEW_LOCKED_STATUSES = Set.of("submitted", "approved", "published");
     private static final Set<String> DANGEROUS_CODE_KEYWORDS = Set.of(
         "os.system", "subprocess", "rm -rf", "curl ", "wget ", "chmod", "sudo", "eval(", "exec(", "socket", "requests", "open('/etc"
