@@ -6,6 +6,7 @@ import com.alibaba.fastjson.JSONObject;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.IdWorker;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import lombok.extern.slf4j.Slf4j;
 import org.jeecg.common.exception.JeecgBootException;
 import org.jeecg.common.system.vo.LoginUser;
 import org.jeecg.modules.openclaw.constant.OpenclawConstants;
@@ -52,6 +53,7 @@ import java.util.Map;
 import java.util.Set;
 
 @Service
+@Slf4j
 public class OpenclawSkillReviewServiceImpl extends ServiceImpl<OpenclawSkillReviewMapper, OpenclawSkillReview> implements IOpenclawSkillReviewService {
     private static final Set<String> OPEN_REVIEW_STATUSES = Set.of("SUBMITTED");
     private static final Set<String> TERMINAL_REVIEW_STATUSES = Set.of("APPROVED", "REJECTED", "CANCELLED");
@@ -78,51 +80,56 @@ public class OpenclawSkillReviewServiceImpl extends ServiceImpl<OpenclawSkillRev
     @Override
     @Transactional(rollbackFor = Exception.class)
     public OpenclawSkillReview submitReview(String draftId, Integer versionNo, OpenclawSkillReviewSubmitDTO dto) {
-        OpenclawSkillDraft draft = requireDraftForOwner(draftId);
-        OpenclawSkillDraftVersion version = requireVersion(draft, versionNo);
-        if (!"lint_passed".equals(version.getLintStatus())) {
-            throw new JeecgBootException("Only lint passed versions can be submitted for review.");
-        }
-        if (!OpenclawConstants.RUN_STATUS_SUCCESS.equals(version.getTestStatus())) {
-            throw new JeecgBootException("Only test passed versions can be submitted for review.");
-        }
-        OpenclawSkillTestRun run = requireBoundSuccessfulTest(draft, version);
-        Long openCount = count(new LambdaQueryWrapper<OpenclawSkillReview>()
-            .eq(OpenclawSkillReview::getDraftId, draft.getId())
-            .eq(OpenclawSkillReview::getVersionNo, version.getVersionNo())
-            .in(OpenclawSkillReview::getStatus, OPEN_REVIEW_STATUSES)
-            .eq(OpenclawSkillReview::getDelFlag, OpenclawConstants.DEL_FLAG_NORMAL));
-        if (openCount != null && openCount > 0) {
-            throw new JeecgBootException("This draft version already has an unfinished review.");
-        }
+        try {
+            OpenclawSkillDraft draft = requireDraftForOwner(draftId);
+            OpenclawSkillDraftVersion version = requireVersion(draft, versionNo);
+            if (!"lint_passed".equals(version.getLintStatus())) {
+                throw new JeecgBootException("Only lint passed versions can be submitted for review.");
+            }
+            if (!OpenclawConstants.RUN_STATUS_SUCCESS.equals(version.getTestStatus())) {
+                throw new JeecgBootException("Only test passed versions can be submitted for review.");
+            }
+            OpenclawSkillTestRun run = requireBoundSuccessfulTest(draft, version);
+            Long openCount = count(new LambdaQueryWrapper<OpenclawSkillReview>()
+                .eq(OpenclawSkillReview::getDraftId, draft.getId())
+                .eq(OpenclawSkillReview::getVersionNo, version.getVersionNo())
+                .in(OpenclawSkillReview::getStatus, OPEN_REVIEW_STATUSES)
+                .eq(OpenclawSkillReview::getDelFlag, OpenclawConstants.DEL_FLAG_NORMAL));
+            if (openCount != null && openCount > 0) {
+                throw new JeecgBootException("This draft version already has an unfinished review.");
+            }
 
-        LoginUser submitter = permissionService.currentUser();
-        OpenclawSkillReview review = new OpenclawSkillReview();
-        review.setId(IdWorker.getIdStr());
-        review.setDraftId(draft.getId());
-        review.setVersionNo(version.getVersionNo());
-        review.setSkillId(draft.getSkillId());
-        review.setWorkspaceId(null); // TODO: persist workspaceId when Skill drafts are bound to workspaces.
-        review.setSubmitterId(submitter.getId());
-        review.setSubmitterUsername(submitter.getUsername());
-        review.setStatus("SUBMITTED");
-        review.setFileSnapshotJson(version.getFileSnapshot());
-        review.setFileHash(version.getFileHash());
-        review.setTestRunId(run.getId());
-        review.setTestReportJson(JSON.toJSONString(testReportMap(run)));
-        review.setAiRecordIdsJson(JSON.toJSONString(collectAiRecordIds(draft, version)));
-        review.setSubmitComment(trim(dto == null ? null : dto.getSubmitComment(), 1000));
-        review.setSubmittedTime(new Date());
-        review.setCreateBy(submitter.getUsername());
-        review.setCreateTime(new Date());
-        review.setDelFlag(OpenclawConstants.DEL_FLAG_NORMAL);
-        save(review);
-        auditLogService.logSuccess("skill_review_submit", "skill_review", review.getId(), Map.of(
-            "draftId", draft.getId(),
-            "versionNo", version.getVersionNo(),
-            "testRunId", run.getId()
-        ));
-        return review;
+            LoginUser submitter = permissionService.currentUser();
+            OpenclawSkillReview review = new OpenclawSkillReview();
+            review.setId(IdWorker.getIdStr());
+            review.setDraftId(draft.getId());
+            review.setVersionNo(version.getVersionNo());
+            review.setSkillId(draft.getSkillId());
+            review.setWorkspaceId(null); // TODO: persist workspaceId when Skill drafts are bound to workspaces.
+            review.setSubmitterId(submitter.getId());
+            review.setSubmitterUsername(submitter.getUsername());
+            review.setStatus("SUBMITTED");
+            review.setFileSnapshotJson(version.getFileSnapshot());
+            review.setFileHash(version.getFileHash());
+            review.setTestRunId(run.getId());
+            review.setTestReportJson(JSON.toJSONString(testReportMap(run)));
+            review.setAiRecordIdsJson(JSON.toJSONString(collectAiRecordIds(draft, version)));
+            review.setSubmitComment(trim(dto == null ? null : dto.getSubmitComment(), 1000));
+            review.setSubmittedTime(new Date());
+            review.setCreateBy(submitter.getUsername());
+            review.setCreateTime(new Date());
+            review.setDelFlag(OpenclawConstants.DEL_FLAG_NORMAL);
+            save(review);
+            auditLogService.logSuccess("skill_review_submit", "skill_review", review.getId(), Map.of(
+                "draftId", draft.getId(),
+                "versionNo", version.getVersionNo(),
+                "testRunId", run.getId()
+            ));
+            return review;
+        } catch (RuntimeException e) {
+            log.error("skill review submit failed draftId={} versionNo={} message={}", draftId, versionNo, e.getMessage(), e);
+            throw e;
+        }
     }
 
     @Override
