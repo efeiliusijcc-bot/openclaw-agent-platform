@@ -27,6 +27,7 @@ import org.jeecg.modules.openclaw.entity.OpenclawSkillAiEditRecord;
 import org.jeecg.modules.openclaw.entity.OpenclawSkillDraft;
 import org.jeecg.modules.openclaw.entity.OpenclawSkillDraftFile;
 import org.jeecg.modules.openclaw.entity.OpenclawSkillDraftVersion;
+import org.jeecg.modules.openclaw.entity.OpenclawSkillReview;
 import org.jeecg.modules.openclaw.entity.OpenclawSkillTestRun;
 import org.jeecg.modules.openclaw.entity.OpenclawWorkspace;
 import org.jeecg.modules.openclaw.mapper.OpenclawGatewayNodeMapper;
@@ -34,6 +35,7 @@ import org.jeecg.modules.openclaw.mapper.OpenclawSkillAiEditRecordMapper;
 import org.jeecg.modules.openclaw.mapper.OpenclawSkillDraftFileMapper;
 import org.jeecg.modules.openclaw.mapper.OpenclawSkillDraftMapper;
 import org.jeecg.modules.openclaw.mapper.OpenclawSkillDraftVersionMapper;
+import org.jeecg.modules.openclaw.mapper.OpenclawSkillReviewMapper;
 import org.jeecg.modules.openclaw.mapper.OpenclawWorkspaceMapper;
 import org.jeecg.modules.openclaw.service.IOpenclawAgentRunService;
 import org.jeecg.modules.openclaw.service.IOpenclawAuditLogService;
@@ -120,6 +122,8 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
     private SkillAiEditValidator skillAiEditValidator;
     @Autowired
     private OpenclawSkillDraftVersionMapper draftVersionMapper;
+    @Autowired
+    private OpenclawSkillReviewMapper reviewMapper;
 
     @Value("${openclaw.skill.ai.base-url:${OPENCLAW_SKILL_AI_BASE_URL:}}")
     private String skillAiBaseUrl;
@@ -815,117 +819,25 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
     @Override
     @Transactional(rollbackFor = Exception.class)
     public OpenclawSkillDraft submitForReview(String draftId) {
-        OpenclawSkillDraft draft = requireDraft(draftId, false);
-        if ("submitted".equals(draft.getStatus()) || "approved".equals(draft.getStatus()) || "published".equals(draft.getStatus())) {
-            throw new JeecgBootException("Current draft status does not allow submit.");
-        }
-
-        OpenclawSkillDraftLintVO lint = lint(draftId);
-        if (!Boolean.TRUE.equals(lint.getPassed())) {
-            throw new JeecgBootException("Lint must pass before submit.");
-        }
-
-        Long successTestCount = testRunService.count(new LambdaQueryWrapper<OpenclawSkillTestRun>()
-            .eq(OpenclawSkillTestRun::getDraftId, draft.getId())
-            .eq(OpenclawSkillTestRun::getStatus, OpenclawConstants.RUN_STATUS_SUCCESS)
-            .eq(OpenclawSkillTestRun::getDelFlag, OpenclawConstants.DEL_FLAG_NORMAL));
-        if (successTestCount == null || successTestCount < 1 || !OpenclawConstants.RUN_STATUS_SUCCESS.equals(draft.getLastTestStatus())) {
-            throw new JeecgBootException("At least one successful test run is required before submit.");
-        }
-        OpenclawSkillDraftVersion latestVersion = latestDraftVersion(draft);
-        if (latestVersion == null
-            || !"lint_passed".equals(latestVersion.getLintStatus())
-            || !OpenclawConstants.RUN_STATUS_SUCCESS.equals(latestVersion.getTestStatus())) {
-            throw new JeecgBootException("Only a version with lint passed and test passed can be submitted.");
-        }
-
-        draft.setStatus("submitted");
-        draft.setSubmitTime(new Date());
-        draft.setReviewStatus("pending");
-        draft.setReviewComment(null);
-        draft.setReviewedBy(null);
-        draft.setReviewedTime(null);
-        updateById(draft);
-        auditLogService.log("skill_draft_submit", "skill_draft", draft.getId(), draft);
-        return draft;
+        throw new JeecgBootException("Use /openclaw/skill/draft/{draftId}/versions/{versionNo}/submit-review to submit a fixed tested version.");
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public OpenclawSkillDraft approveDraft(String draftId) {
-        OpenclawSkillDraft draft = requireReviewableDraft(draftId);
-        LoginUser reviewer = permissionService.currentUser();
-        draft.setStatus("approved");
-        draft.setReviewStatus("approved");
-        draft.setReviewComment(null);
-        draft.setReviewedBy(reviewer.getUsername());
-        draft.setReviewedTime(new Date());
-        updateById(draft);
-        auditLogService.logSuccess("skill_draft_approve", "skill_draft", draft.getId(), draft);
-        return draft;
+        throw new JeecgBootException("Use /openclaw/skill/reviews/{reviewId}/approve to approve and publish a fixed review snapshot.");
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public OpenclawSkillDraft rejectDraft(String draftId, String reason) {
-        if (!StringUtils.hasText(reason)) {
-            throw new JeecgBootException("Reject reason is required.");
-        }
-        OpenclawSkillDraft draft = requireReviewableDraft(draftId);
-        LoginUser reviewer = permissionService.currentUser();
-        draft.setStatus("rejected");
-        draft.setReviewStatus("rejected");
-        draft.setReviewComment(trim(reason, 1000));
-        draft.setReviewedBy(reviewer.getUsername());
-        draft.setReviewedTime(new Date());
-        updateById(draft);
-        auditLogService.logFailure("skill_draft_reject", "skill_draft", draft.getId(), draft);
-        return draft;
+        throw new JeecgBootException("Use /openclaw/skill/reviews/{reviewId}/reject to reject a fixed review snapshot.");
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public OpenclawSkill publishDraft(String draftId) {
-        OpenclawSkillDraft draft = requirePublishableDraft(draftId);
-        String version = nextPublishVersion(draft);
-        Path targetDir = officialSkillPath(draft, version);
-        if (Files.exists(targetDir)) {
-            throw new JeecgBootException("Skill target directory already exists.");
-        }
-        try {
-            Files.createDirectories(targetDir.getParent());
-            copyDirectory(draftRoot(draft), targetDir);
-            writeSkillManifest(targetDir, draft.getDraftName(), draft.getSkillSlug(), version, draft.getDescription(), draft.getOwnerUsername());
-
-            OpenclawSkill skill = new OpenclawSkill();
-            skill.setOwnerUserId(draft.getOwnerUserId());
-            skill.setOwnerUsername(draft.getOwnerUsername());
-            skill.setName(draft.getDraftName());
-            skill.setSlug(draft.getSkillSlug());
-            skill.setVersion(version);
-            skill.setScope("public");
-            skill.setStatus(OpenclawConstants.SKILL_STATUS_APPROVED);
-            skill.setDescription(draft.getDescription());
-            skill.setPath(targetDir.toString());
-            skill.setChecksum(sha256Directory(targetDir));
-            skill.setFileSize(directorySize(targetDir));
-            skill.setRemark("Published from Skill Draft " + draft.getId());
-            skill.setDelFlag(OpenclawConstants.DEL_FLAG_NORMAL);
-            skillService.save(skill);
-
-            draft.setStatus("published");
-            draft.setReviewStatus("published");
-            draft.setSkillId(skill.getId());
-            updateById(draft);
-            auditLogService.logSuccess("skill_draft_publish", "skill_draft", draft.getId(), Map.of("draft", draft, "skill", skill));
-            return skill;
-        } catch (IOException e) {
-            cleanupQuietly(targetDir);
-            throw new JeecgBootException("Publish Skill draft failed: " + e.getMessage(), e);
-        } catch (RuntimeException e) {
-            cleanupQuietly(targetDir);
-            throw e;
-        }
+        throw new JeecgBootException("Direct draft publish is disabled. Approve a Skill Review to publish its fixed snapshot.");
     }
 
     private OpenclawSkillDraft requireDraft(String draftId, boolean editable) {
@@ -1058,12 +970,26 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
         vo.setSummary(version.getSummary());
         vo.setLintStatus(version.getLintStatus());
         vo.setTestStatus(version.getTestStatus());
+        OpenclawSkillReview review = latestReview(version);
+        if (review != null) {
+            vo.setReviewId(review.getId());
+            vo.setReviewStatus(review.getStatus());
+        }
         vo.setCreatedBy(version.getCreateBy());
         vo.setCreatedTime(version.getCreateTime());
         if (includeFiles) {
             vo.setFiles(parseFileSnapshot(version.getFileSnapshot()));
         }
         return vo;
+    }
+
+    private OpenclawSkillReview latestReview(OpenclawSkillDraftVersion version) {
+        return reviewMapper.selectOne(new LambdaQueryWrapper<OpenclawSkillReview>()
+            .eq(OpenclawSkillReview::getDraftId, version.getDraftId())
+            .eq(OpenclawSkillReview::getVersionNo, version.getVersionNo())
+            .eq(OpenclawSkillReview::getDelFlag, OpenclawConstants.DEL_FLAG_NORMAL)
+            .orderByDesc(OpenclawSkillReview::getCreateTime)
+            .last("limit 1"));
     }
 
     private Map<String, String> readCurrentFileSnapshot(OpenclawSkillDraft draft) {

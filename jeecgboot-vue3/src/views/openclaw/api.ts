@@ -45,6 +45,8 @@ export const listSkillDraftVersions = (id: string) => defHttp.get({ url: `/openc
 export const getSkillDraftVersion = (id: string, versionNo: number) => defHttp.get({ url: `/openclaw/skill/draft/${id}/versions/${versionNo}` });
 export const diffSkillDraftVersion = (id: string, params) => defHttp.get({ url: `/openclaw/skill/draft/${id}/versions/diff`, params });
 export const rollbackSkillDraftVersion = (id: string, versionNo: number) => defHttp.post({ url: `/openclaw/skill/draft/${id}/versions/${versionNo}/rollback` });
+export const submitSkillDraftVersionReview = (id: string, versionNo: number, params) =>
+  defHttp.post({ url: `/openclaw/skill/draft/${id}/versions/${versionNo}/submit-review`, params });
 export const repairSkillDraft = (id: string, params) => defHttp.post({ url: `/openclaw/skill/draft/${id}/repair`, params, timeout: 120 * 1000 });
 export const applySkillDraftRepair = (id: string, params) => defHttp.post({ url: `/openclaw/skill/draft/${id}/repair/apply`, params });
 export const previewSkillDraftAiEdit = (id: string, params) =>
@@ -55,6 +57,11 @@ export const approveSkillDraft = (id: string) => defHttp.post({ url: `/openclaw/
 export const rejectSkillDraft = (id: string, reason: string) =>
   defHttp.post({ url: `/openclaw/skill/draft/${id}/reject`, params: { reason } }, { joinParamsToUrl: true });
 export const publishSkillDraft = (id: string) => defHttp.post({ url: `/openclaw/skill/draft/${id}/publish` });
+export const listSkillReviews = (params) => defHttp.get({ url: '/openclaw/skill/reviews', params });
+export const getSkillReview = (reviewId: string) => defHttp.get({ url: `/openclaw/skill/reviews/${reviewId}` });
+export const approveSkillReview = (reviewId: string, params) => defHttp.post({ url: `/openclaw/skill/reviews/${reviewId}/approve`, params });
+export const rejectSkillReview = (reviewId: string, params) => defHttp.post({ url: `/openclaw/skill/reviews/${reviewId}/reject`, params });
+export const cancelSkillReview = (reviewId: string, params) => defHttp.post({ url: `/openclaw/skill/reviews/${reviewId}/cancel`, params });
 
 export const listRuns = (params) => defHttp.get({ url: '/openclaw/run/list', params });
 export const getRunDetail = (id: string) => defHttp.get({ url: `/openclaw/run/${id}` });

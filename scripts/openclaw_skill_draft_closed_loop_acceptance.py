@@ -194,6 +194,70 @@ No file, network, credential, database, or shell access is required.
         "versionNo": latest_after_test.get("versionNo"),
         "testStatus": latest_after_test.get("testStatus"),
     })
+    review_id = None
+    submitted_version_no = latest_after_test.get("versionNo")
+    if submitted_version_no and latest_after_test.get("lintStatus") == "lint_passed" and latest_after_test.get("testStatus") == "success":
+        status, review = request("POST", f"/openclaw/skill/draft/{draft_id}/versions/{submitted_version_no}/submit-review", {
+            "submitComment": "closed-loop acceptance submit fixed version",
+        }, token)
+        review_result = (review or {}).get("result") or {}
+        review_id = review_result.get("id")
+        results.append({
+            "step": "review-submit",
+            "http": status,
+            "success": ok(review) and review_result.get("status") == "SUBMITTED" and bool(review_result.get("fileSnapshotJson")),
+            "reviewId": review_id,
+            "versionNo": review_result.get("versionNo"),
+            "status": review_result.get("status"),
+            "hasSnapshot": bool(review_result.get("fileSnapshotJson")),
+        })
+        status, detail = request("GET", f"/openclaw/skill/reviews/{review_id}", token=token)
+        detail_result = (detail or {}).get("result") or {}
+        fixed_main_before = ((detail_result.get("files") or {}).get("main.py") or "")
+        results.append({
+            "step": "review-detail-before-approve",
+            "http": status,
+            "success": ok(detail)
+                and bool(detail_result.get("files"))
+                and bool(detail_result.get("testReport"))
+                and (detail_result.get("review") or {}).get("id") == review_id,
+            "hasFiles": bool(detail_result.get("files")),
+            "hasTestReport": bool(detail_result.get("testReport")),
+            "aiRecordCount": len(detail_result.get("aiRecords") or []),
+        })
+        status, approved = request("POST", f"/openclaw/skill/reviews/{review_id}/approve", {
+            "comment": "closed-loop acceptance approve and publish",
+        }, token)
+        approved_result = (approved or {}).get("result") or {}
+        results.append({
+            "step": "review-approve-publish",
+            "http": status,
+            "success": ok(approved)
+                and approved_result.get("status") == "APPROVED"
+                and bool(approved_result.get("publishedSkillId"))
+                and bool(approved_result.get("publishedVersionNo")),
+            "publishedSkillId": approved_result.get("publishedSkillId"),
+            "publishedVersionNo": approved_result.get("publishedVersionNo"),
+        })
+        status, modified = save_file(draft_id, token, "main.py", "def run(input_text: str) -> str:\n    return 'DRAFT_CHANGED_AFTER_PUBLISH'\n")
+        results.append({"step": "review-mutate-draft-after-publish", "http": status, "success": ok(modified)})
+        status, detail_after = request("GET", f"/openclaw/skill/reviews/{review_id}", token=token)
+        detail_after_result = (detail_after or {}).get("result") or {}
+        fixed_main_after = ((detail_after_result.get("files") or {}).get("main.py") or "")
+        published_snapshot = (((detail_after_result.get("publishedVersion") or {}).get("fileSnapshotJson")) or "{}")
+        try:
+            published_files = json.loads(published_snapshot)
+        except Exception:
+            published_files = {}
+        results.append({
+            "step": "published-snapshot-isolated",
+            "http": status,
+            "success": ok(detail_after)
+                and fixed_main_before == fixed_main_after
+                and "DRAFT_CHANGED_AFTER_PUBLISH" not in (published_files.get("main.py") or ""),
+            "reviewSnapshotUnchanged": fixed_main_before == fixed_main_after,
+            "publishedSnapshotUnchanged": "DRAFT_CHANGED_AFTER_PUBLISH" not in (published_files.get("main.py") or ""),
+        })
     if first_version_no:
         status, diff = request("GET", f"/openclaw/skill/draft/{draft_id}/versions/diff?fromVersionNo={first_version_no}", token=token)
         diff_result = (diff or {}).get("result") or {}

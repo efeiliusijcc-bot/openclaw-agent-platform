@@ -18,11 +18,14 @@ import org.jeecg.modules.openclaw.dto.OpenclawSkillAiEditApplyDTO;
 import org.jeecg.modules.openclaw.dto.OpenclawSkillAiEditPreviewDTO;
 import org.jeecg.modules.openclaw.dto.OpenclawSkillRepairApplyDTO;
 import org.jeecg.modules.openclaw.dto.OpenclawSkillRepairDTO;
+import org.jeecg.modules.openclaw.dto.OpenclawSkillReviewSubmitDTO;
 import org.jeecg.modules.openclaw.entity.OpenclawSkill;
 import org.jeecg.modules.openclaw.entity.OpenclawSkillDraft;
+import org.jeecg.modules.openclaw.entity.OpenclawSkillReview;
 import org.jeecg.modules.openclaw.entity.OpenclawSkillTestRun;
 import org.jeecg.modules.openclaw.service.IOpenclawPermissionService;
 import org.jeecg.modules.openclaw.service.IOpenclawSkillDraftService;
+import org.jeecg.modules.openclaw.service.IOpenclawSkillReviewService;
 import org.jeecg.modules.openclaw.service.IOpenclawSkillTestRunService;
 import org.jeecg.modules.openclaw.vo.OpenclawSkillDraftFileContentVO;
 import org.jeecg.modules.openclaw.vo.OpenclawSkillDraftFileNodeVO;
@@ -53,6 +56,8 @@ public class OpenclawSkillDraftController {
     private IOpenclawPermissionService permissionService;
     @Autowired
     private IOpenclawSkillTestRunService testRunService;
+    @Autowired
+    private IOpenclawSkillReviewService reviewService;
 
     @GetMapping("/list")
     @RequiresPermissions("openclaw:skill:draft:list")
@@ -242,5 +247,13 @@ public class OpenclawSkillDraftController {
     @RequiresPermissions("openclaw:skill:draft:edit")
     public Result<OpenclawSkillDraftVersionVO> rollbackVersion(@PathVariable String id, @PathVariable Integer versionNo) {
         return Result.OK(draftService.rollbackVersion(id, versionNo));
+    }
+
+    @PostMapping("/{id}/versions/{versionNo}/submit-review")
+    @RequiresPermissions("openclaw:skill:draft:submit")
+    public Result<OpenclawSkillReview> submitVersionReview(@PathVariable String id,
+                                                           @PathVariable Integer versionNo,
+                                                           @RequestBody(required = false) OpenclawSkillReviewSubmitDTO dto) {
+        return Result.OK(reviewService.submitReview(id, versionNo, dto));
     }
 }

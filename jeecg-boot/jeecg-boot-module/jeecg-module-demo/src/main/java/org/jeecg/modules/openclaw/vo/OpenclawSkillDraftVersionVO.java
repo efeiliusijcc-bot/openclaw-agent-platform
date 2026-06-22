@@ -18,6 +18,8 @@ public class OpenclawSkillDraftVersionVO {
     private String summary;
     private String lintStatus;
     private String testStatus;
+    private String reviewId;
+    private String reviewStatus;
     private String createdBy;
     private Date createdTime;
     private Map<String, String> files;

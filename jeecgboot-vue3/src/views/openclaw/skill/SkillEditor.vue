@@ -8,10 +8,6 @@
         <a-button preIcon="ant-design:check-circle-outlined" :disabled="!canEdit" @click="runLint">Lint</a-button>
         <a-button preIcon="ant-design:edit-outlined" :loading="repairing" :disabled="!canEdit" @click="openAiEdit">AI Edit</a-button>
         <a-button preIcon="ant-design:tool-outlined" :loading="repairing" :disabled="!canEdit" @click="runRepair">AI Repair</a-button>
-        <a-button preIcon="ant-design:audit-outlined" :disabled="!canSubmit" @click="submitReview">Submit</a-button>
-        <a-button preIcon="ant-design:check-outlined" :disabled="!canReview" @click="approveReview">Approve</a-button>
-        <a-button danger preIcon="ant-design:close-outlined" :disabled="!canReview" @click="rejectReview">Reject</a-button>
-        <a-button preIcon="ant-design:cloud-upload-outlined" :disabled="!canPublish" @click="publishReview">Publish</a-button>
       </a-space>
       <div class="current-path">{{ draft?.status || '-' }} / {{ currentPath || '请选择文件' }}</div>
     </div>
@@ -99,10 +95,12 @@
               <div class="version-status">
                 Lint: {{ item.lintStatus || '-' }} / Test: {{ item.testStatus || '-' }}
               </div>
+              <div v-if="item.reviewStatus" class="version-status">Review: {{ item.reviewStatus }}</div>
               <div class="version-summary">{{ item.summary || '-' }}</div>
               <a-space>
                 <a-button size="small" @click="openVersionDetail(item.versionNo)">详情</a-button>
                 <a-button size="small" @click="openVersionDiff(item.versionNo)">Diff</a-button>
+                <a-button size="small" type="primary" :disabled="!canSubmitVersion(item)" @click="submitVersionReview(item)">鎻愪氦瀹℃牳</a-button>
                 <a-button size="small" danger :disabled="!canEdit" @click="rollbackVersion(item.versionNo)">回滚</a-button>
               </a-space>
             </div>
@@ -228,7 +226,6 @@
   import { CodeEditor } from '/@/components/CodeEditor';
   import { useMessage } from '/@/hooks/web/useMessage';
   import {
-    approveSkillDraft,
     applySkillDraftAiEdit,
     applySkillDraftRepair,
     createSkillDraftFile,
@@ -241,16 +238,14 @@
     lintSkillDraft,
     listSkillDraftVersions,
     listSkillDraftTests,
-    publishSkillDraft,
     previewSkillDraftAiEdit,
     readSkillDraftFile,
-    rejectSkillDraft,
     repairSkillDraft,
     rollbackSkillDraftVersion,
     runSkillDraftBatchTests,
     runSkillDraftTest,
     saveSkillDraftFile,
-    submitSkillDraft,
+    submitSkillDraftVersionReview,
   } from '../api';
 
   const route = useRoute();
@@ -298,9 +293,6 @@
   });
   const hasLintMessages = computed(() => (lintResult.value?.errors?.length || 0) > 0 || (lintResult.value?.warnings?.length || 0) > 0);
   const canEdit = computed(() => ['editing', 'lint_failed', 'lint_passed', 'test_failed', 'test_passed', 'rejected'].includes(draft.value?.status));
-  const canReview = computed(() => draft.value?.status === 'submitted');
-  const canPublish = computed(() => draft.value?.status === 'approved');
-  const canSubmit = computed(() => canEdit.value && draft.value?.lastTestStatus === 'success');
 
   onMounted(async () => {
     await loadDraft();
@@ -544,59 +536,27 @@
     }
   }
 
-  function submitReview() {
-    if (!canSubmit.value) return;
-    Modal.confirm({
-      title: 'Submit this draft for review?',
-      onOk: async () => {
-        await submitSkillDraft(draftId.value);
-        createMessage.success('Submitted for review');
-        goBack();
-      },
-    });
+  function canSubmitVersion(item) {
+    return item?.lintStatus === 'lint_passed' && item?.testStatus === 'success' && !['SUBMITTED', 'APPROVED'].includes(item?.reviewStatus);
   }
 
-  function approveReview() {
-    if (!canReview.value) return;
+  function submitVersionReview(item) {
+    if (!canSubmitVersion(item)) return;
+    let submitComment = '';
     Modal.confirm({
-      title: 'Approve this draft?',
-      onOk: async () => {
-        await approveSkillDraft(draftId.value);
-        createMessage.success('Approved');
-        await loadDraft();
-      },
-    });
-  }
-
-  function rejectReview() {
-    if (!canReview.value) return;
-    let reason = '';
-    Modal.confirm({
-      title: 'Reject this draft?',
+      title: `鎻愪氦 v${item.versionNo} 瀹℃牳?`,
       content: h(Input.TextArea, {
         rows: 3,
-        placeholder: 'Reject reason',
+        placeholder: 'Submit comment',
         onChange: (event: Event) => {
-          reason = (event.target as HTMLTextAreaElement).value;
+          submitComment = (event.target as HTMLTextAreaElement).value;
         },
       }),
-      okText: 'Reject',
+      okText: '鎻愪氦瀹℃牳',
       onOk: async () => {
-        await rejectSkillDraft(draftId.value, reason);
-        createMessage.warning('Rejected');
-        await loadDraft();
-      },
-    });
-  }
-
-  function publishReview() {
-    if (!canPublish.value) return;
-    Modal.confirm({
-      title: 'Publish this draft as a formal Skill?',
-      onOk: async () => {
-        const skill = await publishSkillDraft(draftId.value);
-        createMessage.success(`Published ${skill.slug} ${skill.version}`);
-        await loadDraft();
+        const review = await submitSkillDraftVersionReview(draftId.value, item.versionNo, { submitComment });
+        createMessage.success(`Submitted review ${review.id}: ${review.status}`);
+        await loadVersions();
       },
     });
   }
