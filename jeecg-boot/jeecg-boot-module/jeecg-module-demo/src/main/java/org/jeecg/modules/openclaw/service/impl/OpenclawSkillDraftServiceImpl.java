@@ -734,7 +734,7 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
             ));
             OpenclawSkillAiEditVO result = toAiEditVO(record, applied, JSON.parseArray(record.getWarningsJson(), String.class));
             result.setSource("applied");
-            result.setSummary("Applied " + applied.size() + " AI edit file change(s). Run Lint and tests next.");
+            result.setSummary("已应用 " + applied.size() + " 个 AI 编辑文件变更。请继续运行 Lint 和测试。");
             return result;
         } catch (IOException e) {
             record.setStatus("FAILED");
@@ -797,7 +797,7 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
             result.setDraftId(draft.getId());
             result.setTestRunId(record.getTestRunId());
             result.setSource("applied");
-            result.setSummary("Applied " + applied.size() + " repair file change(s). Run Lint and tests again.");
+            result.setSummary("已应用 " + applied.size() + " 个修复文件变更。请重新运行 Lint 和测试。");
             result.setFiles(applied);
             result.setStatus(record.getStatus());
             result.setRepairBeforeStatus(record.getRepairBeforeStatus());
@@ -1446,7 +1446,7 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
         spec.description = trim(firstText(dto.getDescription(), dto.getRequirement()), 2000);
         spec.files = new LinkedHashMap<>();
         addGeneratedFile(spec, "SKILL.md", skillMdContent(spec.draftName, spec.description, dto.getRequirement()));
-        addGeneratedFile(spec, "README.md", "# " + spec.draftName + "\n\n" + spec.description + "\n\nGenerated as an editable OpenClaw Skill draft. Run Lint and tests before submitting for review.\n");
+        addGeneratedFile(spec, "README.md", "# " + spec.draftName + "\n\n" + spec.description + "\n\n已生成为可编辑的 OpenClaw Skill 草稿。提交审核前请运行 Lint 和测试。\n");
         addGeneratedFile(spec, "examples/test_prompt.md", "Use this Skill for the following requirement:\n\n" + dto.getRequirement() + "\n");
         return spec;
     }
@@ -1645,59 +1645,59 @@ public class OpenclawSkillDraftServiceImpl extends ServiceImpl<OpenclawSkillDraf
         result.setDraftId(draft.getId());
         result.setTestRunId(run == null ? null : run.getId());
         result.setSource("fallback");
-        result.setSummary("AI edit model is not configured or unavailable. Generated safe notes and lint-oriented suggestions.");
-        result.getWarnings().add("Review every suggested change before applying it, then rerun Lint and tests.");
+        result.setSummary("AI 编辑模型未配置或暂不可用，已生成安全说明和面向 Lint 的修改建议。");
+        result.getWarnings().add("应用前请逐项检查建议内容，应用后重新运行 Lint 和测试。");
         String skillMd = files.get("SKILL.md");
         if (StringUtils.hasText(skillMd)) {
             String improved = ensureSkillMdSections(skillMd, draft, run);
             if (!improved.equals(skillMd)) {
-                addRepairSuggestion(result, files, "SKILL.md", "upsert", "Add missing standard Skill sections required by lint.", improved);
+                addRepairSuggestion(result, files, "SKILL.md", "upsert", "补齐 Lint 要求的标准 Skill 章节。", improved);
             }
         }
         String notes = repairNotesContent(draft, run, dto);
-        addRepairSuggestion(result, files, "EDIT_NOTES.md", "upsert", "Record the natural-language change request and manual follow-up checks for this edit round.", notes);
+        addRepairSuggestion(result, files, "EDIT_NOTES.md", "upsert", "记录本轮自然语言修改要求和后续人工检查项。", notes);
         return result;
     }
 
     private String ensureSkillMdSections(String content, OpenclawSkillDraft draft, OpenclawSkillTestRun run) {
         String value = content;
         if (!value.contains("## Purpose")) {
-            value += "\n\n## Purpose\n\n" + safeText(firstText(draft.getDescription(), "Describe the Skill purpose.")) + "\n";
+            value += "\n\n## Purpose\n\n" + safeText(firstText(draft.getDescription(), "描述这个 Skill 的用途。")) + "\n";
         }
         if (!value.contains("## When to use")) {
-            value += "\n\n## When to use\n\nUse this Skill when the task matches " + safeText(draft.getSkillSlug()) + ".\n";
+            value += "\n\n## When to use\n\n当任务匹配 " + safeText(draft.getSkillSlug()) + " 时使用这个 Skill。\n";
         }
         if (!value.contains("## Inputs")) {
-            value += "\n\n## Inputs\n\n- User request\n- Relevant workspace files or context\n";
+            value += "\n\n## Inputs\n\n- 用户请求\n- 相关工作区文件或上下文\n";
         }
         if (!value.contains("## Outputs")) {
-            value += "\n\n## Outputs\n\n- A response or artifact that satisfies the request\n- Notes about assumptions and follow-up checks\n";
+            value += "\n\n## Outputs\n\n- 满足请求的回复或产物\n- 关于假设和后续检查的说明\n";
         }
         if (!value.contains("## Examples")) {
-            value += "\n\n## Examples\n\n" + safeText(run == null ? "Run a smoke test for this Skill." : run.getPrompt()) + "\n";
+            value += "\n\n## Examples\n\n" + safeText(run == null ? "为这个 Skill 运行一次冒烟测试。" : run.getPrompt()) + "\n";
         }
         if (!value.contains("## Safety")) {
-            value += "\n\n## Safety\n\nDo not run destructive commands or access files outside the workspace. Keep external calls explicit and auditable.\n";
+            value += "\n\n## Safety\n\n不要运行破坏性命令，不要访问工作区外的文件。外部调用必须明确且可审计。\n";
         }
         return value;
     }
 
     private String repairNotesContent(OpenclawSkillDraft draft, OpenclawSkillTestRun run, OpenclawSkillRepairDTO dto) {
         StringBuilder builder = new StringBuilder();
-        builder.append("# Edit Notes\n\n");
-        builder.append("- Draft: ").append(safeText(draft.getDraftName())).append(" (`").append(safeText(draft.getSkillSlug())).append("`)\n");
-        builder.append("- Status: ").append(safeText(draft.getStatus())).append("\n");
+        builder.append("# 编辑说明\n\n");
+        builder.append("- 草稿：").append(safeText(draft.getDraftName())).append(" (`").append(safeText(draft.getSkillSlug())).append("`)\n");
+        builder.append("- 状态：").append(safeText(draft.getStatus())).append("\n");
         if (run != null) {
-            builder.append("- Test run: ").append(run.getId()).append("\n");
-            builder.append("- Test status: ").append(safeText(run.getStatus())).append("\n\n");
-            builder.append("## Prompt\n\n").append(safeText(run.getPrompt())).append("\n\n");
-            builder.append("## Output Summary\n\n").append(safeText(run.getOutputSummary())).append("\n\n");
-            builder.append("## Error Message\n\n").append(safeText(run.getErrorMessage())).append("\n\n");
+            builder.append("- 测试运行：").append(run.getId()).append("\n");
+            builder.append("- 测试状态：").append(safeText(run.getStatus())).append("\n\n");
+            builder.append("## 测试 Prompt\n\n").append(safeText(run.getPrompt())).append("\n\n");
+            builder.append("## 输出摘要\n\n").append(safeText(run.getOutputSummary())).append("\n\n");
+            builder.append("## 错误信息\n\n").append(safeText(run.getErrorMessage())).append("\n\n");
         }
         if (dto != null && StringUtils.hasText(dto.getInstruction())) {
-            builder.append("## Natural-Language Instruction\n\n").append(safeText(dto.getInstruction())).append("\n\n");
+            builder.append("## 自然语言指令\n\n").append(safeText(dto.getInstruction())).append("\n\n");
         }
-        builder.append("## Next Checks\n\n- Run Lint.\n- Rerun the failed test prompt.\n- Remove this note before publishing if it is not useful to reviewers.\n");
+        builder.append("## 下一步检查\n\n- 运行 Lint。\n- 重新运行失败的测试 Prompt。\n- 如果这份说明对审核没有帮助，发布前可以删除。\n");
         return builder.toString();
     }
 

@@ -6,8 +6,8 @@
         <a-button preIcon="ant-design:reload-outlined" @click="loadTree">刷新</a-button>
         <a-button type="primary" preIcon="ant-design:save-outlined" :disabled="!currentPath || !canEdit" @click="saveCurrentFile">保存</a-button>
         <a-button preIcon="ant-design:check-circle-outlined" :disabled="!canEdit" @click="runLint">Lint</a-button>
-        <a-button preIcon="ant-design:edit-outlined" :loading="repairing" :disabled="!canEdit" @click="openAiEdit">AI Edit</a-button>
-        <a-button preIcon="ant-design:tool-outlined" :loading="repairing" :disabled="!canEdit" @click="runRepair">AI Repair</a-button>
+        <a-button preIcon="ant-design:edit-outlined" :loading="repairing" :disabled="!canEdit" @click="openAiEdit">AI 编辑</a-button>
+        <a-button preIcon="ant-design:tool-outlined" :loading="repairing" :disabled="!canEdit" @click="runRepair">AI 修复</a-button>
       </a-space>
       <div class="current-path">{{ draft?.status || '-' }} / {{ currentPath || '请选择文件' }}</div>
     </div>
@@ -47,7 +47,7 @@
             </a-form-item>
             <a-space direction="vertical" style="width: 100%">
               <a-button type="primary" block preIcon="ant-design:play-circle-outlined" :loading="testing" :disabled="!canEdit" @click="runTest">运行测试</a-button>
-              <a-button block preIcon="ant-design:unordered-list-outlined" :loading="batchTesting" :disabled="!canEdit" @click="openBatchTest">Batch Test</a-button>
+              <a-button block preIcon="ant-design:unordered-list-outlined" :loading="batchTesting" :disabled="!canEdit" @click="openBatchTest">批量测试</a-button>
             </a-space>
           </a-form>
           <a-divider />
@@ -63,23 +63,23 @@
             <a-empty v-if="!testRuns.length" description="暂无测试记录" />
           </div>
         </a-card>
-        <a-card size="small" title="Test Report" class="test-report-card" :loading="reportLoading">
-          <a-empty v-if="!selectedReport" description="No report selected" />
+        <a-card size="small" title="测试报告" class="test-report-card" :loading="reportLoading">
+          <a-empty v-if="!selectedReport" description="未选择测试报告" />
           <template v-else>
             <a-descriptions :column="1" size="small" bordered>
-              <a-descriptions-item label="Status">{{ selectedReport.status }}</a-descriptions-item>
-              <a-descriptions-item label="Test Run">{{ selectedReport.testRunId }}</a-descriptions-item>
+              <a-descriptions-item label="状态">{{ selectedReport.status }}</a-descriptions-item>
+              <a-descriptions-item label="测试运行">{{ selectedReport.testRunId }}</a-descriptions-item>
               <a-descriptions-item label="Agent">{{ selectedReport.agentKey || '-' }}</a-descriptions-item>
               <a-descriptions-item label="Lint">{{ selectedReport.lintStatus || '-' }}</a-descriptions-item>
               <a-descriptions-item label="Gateway">{{ selectedReport.gatewayStatus || '-' }}</a-descriptions-item>
-              <a-descriptions-item label="Duration">{{ selectedReport.durationMs ?? '-' }}ms</a-descriptions-item>
-              <a-descriptions-item label="Error">{{ selectedReport.error?.type || '-' }} / {{ selectedReport.error?.code || '-' }}</a-descriptions-item>
+              <a-descriptions-item label="耗时">{{ selectedReport.durationMs ?? '-' }}ms</a-descriptions-item>
+              <a-descriptions-item label="错误">{{ selectedReport.error?.type || '-' }} / {{ selectedReport.error?.code || '-' }}</a-descriptions-item>
             </a-descriptions>
             <a-tabs size="small">
-              <a-tab-pane key="input" tab="Input"><pre class="report-pre">{{ selectedReport.input || '-' }}</pre></a-tab-pane>
-              <a-tab-pane key="output" tab="Output"><pre class="report-pre">{{ selectedReport.output || '-' }}</pre></a-tab-pane>
-              <a-tab-pane key="error" tab="Error"><pre class="report-pre">{{ selectedReport.error?.message || '-' }}</pre></a-tab-pane>
-              <a-tab-pane key="logs" tab="Logs"><pre class="report-pre">{{ (selectedReport.logs || []).join('\n') || '-' }}</pre></a-tab-pane>
+              <a-tab-pane key="input" tab="输入"><pre class="report-pre">{{ selectedReport.input || '-' }}</pre></a-tab-pane>
+              <a-tab-pane key="output" tab="输出"><pre class="report-pre">{{ selectedReport.output || '-' }}</pre></a-tab-pane>
+              <a-tab-pane key="error" tab="错误"><pre class="report-pre">{{ selectedReport.error?.message || '-' }}</pre></a-tab-pane>
+              <a-tab-pane key="logs" tab="日志"><pre class="report-pre">{{ (selectedReport.logs || []).join('\n') || '-' }}</pre></a-tab-pane>
             </a-tabs>
           </template>
         </a-card>
@@ -99,7 +99,7 @@
               <div class="version-summary">{{ item.summary || '-' }}</div>
               <a-space>
                 <a-button size="small" @click="openVersionDetail(item.versionNo)">详情</a-button>
-                <a-button size="small" @click="openVersionDiff(item.versionNo)">Diff</a-button>
+                <a-button size="small" @click="openVersionDiff(item.versionNo)">差异</a-button>
                 <a-button size="small" type="primary" :disabled="!canSubmitVersion(item)" @click="submitVersionReview(item)">鎻愪氦瀹℃牳</a-button>
                 <a-button size="small" danger :disabled="!canEdit" @click="rollbackVersion(item.versionNo)">回滚</a-button>
               </a-space>
@@ -122,13 +122,13 @@
       </aside>
     </div>
 
-    <a-modal v-model:open="aiEditVisible" title="AI Edit Skill" :confirmLoading="repairing" @ok="runAiEdit" destroyOnClose>
+    <a-modal v-model:open="aiEditVisible" title="AI 编辑 Skill" :confirmLoading="repairing" @ok="runAiEdit" destroyOnClose>
       <a-form layout="vertical">
-        <a-form-item label="Change Request" required>
+        <a-form-item label="修改要求" required>
           <a-textarea
             v-model:value="aiEditInstruction"
             :rows="6"
-            placeholder="Describe how to change this Skill. Example: make it focus on invoice extraction and add a JSON output example."
+            placeholder="描述你希望如何修改这个 Skill。例如：改成发票抽取 Skill，并增加 JSON 输出示例。"
           />
         </a-form-item>
       </a-form>
@@ -139,35 +139,35 @@
       <div v-if="repairResult?.warnings?.length" class="repair-warnings">
         <a-alert v-for="item in repairResult.warnings" :key="item" type="warning" :message="item" show-icon />
       </div>
-      <a-empty v-if="!repairResult?.files?.length" description="No repair suggestions" />
+      <a-empty v-if="!repairResult?.files?.length" description="暂无修复建议" />
       <div v-for="file in repairResult?.files || []" :key="file.path" class="repair-file">
         <div class="repair-file-header">
           <strong>{{ file.action || 'upsert' }} {{ file.path }}</strong>
-          <a-button v-if="!repairResult?.recordId" size="small" type="primary" :loading="applyingRepair" @click="applyRepairFile(file)">Apply</a-button>
+          <a-button v-if="!repairResult?.recordId" size="small" type="primary" :loading="applyingRepair" @click="applyRepairFile(file)">应用</a-button>
         </div>
         <p v-if="file.explanation">{{ file.explanation }}</p>
         <a-tabs size="small">
-          <a-tab-pane key="diff" tab="Diff">
-            <pre class="repair-diff">{{ file.diff || 'No diff available.' }}</pre>
+          <a-tab-pane key="diff" tab="差异">
+            <pre class="repair-diff">{{ file.diff || '暂无差异。' }}</pre>
           </a-tab-pane>
-          <a-tab-pane key="content" tab="New Content">
-            <pre class="repair-diff">{{ file.action === 'delete' ? '(delete file)' : file.content }}</pre>
+          <a-tab-pane key="content" tab="新内容">
+            <pre class="repair-diff">{{ file.action === 'delete' ? '（删除文件）' : file.content }}</pre>
           </a-tab-pane>
         </a-tabs>
       </div>
       <a-button v-if="repairResult?.files?.length" type="primary" block :loading="applyingRepair" @click="applyAllRepairs">
-        {{ repairResult?.recordId ? (suggestionMode === 'aiEdit' ? 'Confirm and Apply AI Edit' : 'Confirm and Apply AI Repair') : 'Apply All Suggestions' }}
+        {{ repairResult?.recordId ? (suggestionMode === 'aiEdit' ? '确认并应用 AI 编辑' : '确认并应用 AI 修复') : '应用全部建议' }}
       </a-button>
       <a-space v-if="repairResult?.source === 'applied' && suggestionMode === 'repair'" direction="vertical" style="width: 100%; margin-top: 12px">
-        <a-button block preIcon="ant-design:check-circle-outlined" @click="runLint">Run Lint Again</a-button>
-        <a-button block type="primary" preIcon="ant-design:play-circle-outlined" @click="runTest">Run Test Again</a-button>
+        <a-button block preIcon="ant-design:check-circle-outlined" @click="runLint">重新运行 Lint</a-button>
+        <a-button block type="primary" preIcon="ant-design:play-circle-outlined" @click="runTest">重新运行测试</a-button>
       </a-space>
     </a-modal>
 
-    <a-modal v-model:open="batchVisible" title="Batch Test Cases" :confirmLoading="batchTesting" @ok="runBatchTest" destroyOnClose>
+    <a-modal v-model:open="batchVisible" title="批量测试用例" :confirmLoading="batchTesting" @ok="runBatchTest" destroyOnClose>
       <a-form layout="vertical">
         <a-form-item label="Prompts" required>
-          <a-textarea v-model:value="batchPromptText" :rows="8" placeholder="One prompt per line. Up to 10 prompts." />
+          <a-textarea v-model:value="batchPromptText" :rows="8" placeholder="每行一个 Prompt，最多 10 条。" />
         </a-form-item>
       </a-form>
     </a-modal>
@@ -180,36 +180,36 @@
       </a-form>
     </a-modal>
 
-    <a-modal v-model:open="versionDetailVisible" :title="selectedVersion ? `Version v${selectedVersion.versionNo}` : 'Version Detail'" width="920px" :footer="null" destroyOnClose>
-      <a-empty v-if="!selectedVersion" description="No version selected" />
+    <a-modal v-model:open="versionDetailVisible" :title="selectedVersion ? `版本 v${selectedVersion.versionNo}` : '版本详情'" width="920px" :footer="null" destroyOnClose>
+      <a-empty v-if="!selectedVersion" description="未选择版本" />
       <template v-else>
         <a-descriptions :column="2" size="small" bordered>
-          <a-descriptions-item label="Source">{{ selectedVersion.sourceType }}</a-descriptions-item>
-          <a-descriptions-item label="Record">{{ selectedVersion.sourceRecordId || '-' }}</a-descriptions-item>
+          <a-descriptions-item label="来源">{{ selectedVersion.sourceType }}</a-descriptions-item>
+          <a-descriptions-item label="记录">{{ selectedVersion.sourceRecordId || '-' }}</a-descriptions-item>
           <a-descriptions-item label="Lint">{{ selectedVersion.lintStatus || '-' }}</a-descriptions-item>
-          <a-descriptions-item label="Test">{{ selectedVersion.testStatus || '-' }}</a-descriptions-item>
-          <a-descriptions-item label="Test Run">{{ selectedVersion.testRunId || '-' }}</a-descriptions-item>
+          <a-descriptions-item label="测试">{{ selectedVersion.testStatus || '-' }}</a-descriptions-item>
+          <a-descriptions-item label="测试运行">{{ selectedVersion.testRunId || '-' }}</a-descriptions-item>
           <a-descriptions-item label="Hash">{{ selectedVersion.fileHash || '-' }}</a-descriptions-item>
         </a-descriptions>
         <a-tabs size="small" style="margin-top: 12px">
-          <a-tab-pane key="files" tab="Files">
+          <a-tab-pane key="files" tab="文件">
             <div v-for="(value, path) in selectedVersion.files || {}" :key="path" class="version-file">
               <strong>{{ path }}</strong>
               <pre class="report-pre">{{ value }}</pre>
             </div>
           </a-tab-pane>
-          <a-tab-pane key="record" tab="AI Record">
+          <a-tab-pane key="record" tab="AI 记录">
             <pre class="report-pre">{{ selectedVersion.sourceRecord ? JSON.stringify(selectedVersion.sourceRecord, null, 2) : '-' }}</pre>
           </a-tab-pane>
-          <a-tab-pane key="report" tab="Test Report">
+          <a-tab-pane key="report" tab="测试报告">
             <pre class="report-pre">{{ selectedVersion.testReport ? JSON.stringify(selectedVersion.testReport, null, 2) : '-' }}</pre>
           </a-tab-pane>
         </a-tabs>
       </template>
     </a-modal>
 
-    <a-modal v-model:open="versionDiffVisible" title="Version Diff" width="720px" :footer="null" destroyOnClose>
-      <a-empty v-if="!versionDiff?.diffs?.length" description="No file changes" />
+    <a-modal v-model:open="versionDiffVisible" title="版本差异" width="720px" :footer="null" destroyOnClose>
+      <a-empty v-if="!versionDiff?.diffs?.length" description="暂无文件变更" />
       <div v-for="item in versionDiff?.diffs || []" :key="item.path" class="version-diff-row">
         <a-tag :color="item.changeType === 'added' ? 'green' : item.changeType === 'deleted' ? 'red' : 'blue'">{{ item.changeType }}</a-tag>
         <strong>{{ item.path }}</strong>
@@ -267,7 +267,7 @@
   const applyingRepair = ref(false);
   const aiEditVisible = ref(false);
   const aiEditInstruction = ref('');
-  const repairTitle = ref('AI Repair Suggestions');
+  const repairTitle = ref('AI 修复建议');
   const repairVisible = ref(false);
   const repairResult = ref<any>(null);
   const suggestionMode = ref<'aiEdit' | 'repair'>('repair');
@@ -418,20 +418,20 @@
       .map((item) => item.trim())
       .filter(Boolean);
     if (!prompts.length) {
-      createMessage.warning('Please enter at least one prompt');
+      createMessage.warning('请至少输入一个 Prompt');
       return;
     }
     if (prompts.length > 10) {
-      createMessage.warning('Batch test supports at most 10 prompts');
+      createMessage.warning('批量测试最多支持 10 个 Prompt');
       return;
     }
     batchTesting.value = true;
     try {
       const runs = await runSkillDraftBatchTests(draftId.value, {
-        cases: prompts.map((prompt, index) => ({ name: `Case ${index + 1}`, prompt })),
+        cases: prompts.map((prompt, index) => ({ name: `用例 ${index + 1}`, prompt })),
       });
       const failed = (runs || []).filter((item) => item.status !== 'success').length;
-      createMessage[failed ? 'warning' : 'success'](`Batch test finished: ${prompts.length - failed}/${prompts.length} passed`);
+      createMessage[failed ? 'warning' : 'success'](`批量测试完成：${prompts.length - failed}/${prompts.length} 通过`);
       batchVisible.value = false;
       await loadDraft();
       await loadTestRuns();
@@ -450,7 +450,7 @@
   async function runAiEdit() {
     if (!canEdit.value) return;
     if (!aiEditInstruction.value.trim()) {
-      createMessage.warning('Please describe the Skill change');
+      createMessage.warning('请描述要修改的 Skill 内容');
       return;
     }
     repairing.value = true;
@@ -459,7 +459,7 @@
         instruction: aiEditInstruction.value.trim(),
       });
       suggestionMode.value = 'aiEdit';
-      repairTitle.value = 'AI Edit Suggestions';
+      repairTitle.value = 'AI 编辑建议';
       aiEditVisible.value = false;
       repairVisible.value = true;
     } finally {
@@ -474,10 +474,10 @@
       const latestFailed = testRuns.value.find((item) => item.status !== 'success');
       repairResult.value = await repairSkillDraft(draftId.value, {
         testRunId: latestFailed?.id || draft.value?.lastTestRunId,
-        instruction: 'Analyze the latest lint and test failure, then suggest the smallest safe Skill file changes.',
+        instruction: '分析最近一次 Lint 和测试失败原因，并建议最小且安全的 Skill 文件修改。',
       });
       suggestionMode.value = 'repair';
-      repairTitle.value = 'AI Repair Suggestions';
+      repairTitle.value = 'AI 修复建议';
       repairVisible.value = true;
     } finally {
       repairing.value = false;
@@ -496,15 +496,15 @@
     if (!files?.length) return;
     if (repairResult.value?.recordId) {
       Modal.confirm({
-        title: suggestionMode.value === 'aiEdit' ? 'Apply this AI edit preview?' : 'Apply this AI repair preview?',
-        content: 'This will write the suggested files into the current draft. Run Lint and tests after applying.',
+        title: suggestionMode.value === 'aiEdit' ? '应用这次 AI 编辑预览？' : '应用这次 AI 修复预览？',
+        content: '系统会把建议文件写入当前草稿。应用后请重新运行 Lint 和测试。',
         onOk: async () => {
           await applySuggestionPreview();
         },
       });
       return;
     }
-    createMessage.warning('Please regenerate suggestions before applying; recordId is required.');
+    createMessage.warning('请重新生成建议后再应用，当前缺少 recordId。');
   }
 
   async function applySuggestionPreview() {
@@ -515,14 +515,14 @@
           recordId: repairResult.value.recordId,
           reason: repairResult.value?.summary,
         });
-        createMessage.success('AI edit applied. Please run Lint and tests next.');
+        createMessage.success('AI 编辑已应用，请继续运行 Lint 和测试。');
         repairVisible.value = false;
       } else {
         repairResult.value = await applySkillDraftRepair(draftId.value, {
           recordId: repairResult.value.recordId,
           reason: repairResult.value?.summary,
         });
-        createMessage.success('Repair applied. Run Lint and test again.');
+        createMessage.success('修复建议已应用，请重新运行 Lint 和测试。');
       }
       await loadDraft();
       await loadTree();
@@ -547,7 +547,7 @@
       title: `鎻愪氦 v${item.versionNo} 瀹℃牳?`,
       content: h(Input.TextArea, {
         rows: 3,
-        placeholder: 'Submit comment',
+        placeholder: '提交说明',
         onChange: (event: Event) => {
           submitComment = (event.target as HTMLTextAreaElement).value;
         },
@@ -555,7 +555,7 @@
       okText: '鎻愪氦瀹℃牳',
       onOk: async () => {
         const review = await submitSkillDraftVersionReview(draftId.value, item.versionNo, { submitComment });
-        createMessage.success(`Submitted review ${review.id}: ${review.status}`);
+        createMessage.success(`已提交审核 ${review.id}：${review.status}`);
         await loadVersions();
       },
     });

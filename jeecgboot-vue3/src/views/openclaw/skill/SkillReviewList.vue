@@ -6,41 +6,41 @@
       </template>
     </BasicTable>
 
-    <a-drawer v-model:open="detailVisible" title="Skill Review Detail" width="920px" destroyOnClose>
-      <a-empty v-if="!detail" description="No review selected" />
+    <a-drawer v-model:open="detailVisible" title="Skill 审核详情" width="920px" destroyOnClose>
+      <a-empty v-if="!detail" description="未选择审核记录" />
       <template v-else>
         <a-descriptions :column="2" size="small" bordered>
-          <a-descriptions-item label="Review">{{ detail.review?.id }}</a-descriptions-item>
-          <a-descriptions-item label="Status">{{ detail.review?.status }}</a-descriptions-item>
-          <a-descriptions-item label="Draft">{{ detail.review?.draftId }}</a-descriptions-item>
-          <a-descriptions-item label="Draft Version">v{{ detail.review?.versionNo }}</a-descriptions-item>
-          <a-descriptions-item label="Submitter">{{ detail.review?.submitterUsername || detail.review?.submitterId }}</a-descriptions-item>
-          <a-descriptions-item label="Submitted">{{ detail.review?.submittedTime || '-' }}</a-descriptions-item>
-          <a-descriptions-item label="Reviewer">{{ detail.review?.reviewerUsername || '-' }}</a-descriptions-item>
-          <a-descriptions-item label="Published">v{{ detail.review?.publishedVersionNo || '-' }}</a-descriptions-item>
-          <a-descriptions-item label="Submit Comment" :span="2">{{ detail.review?.submitComment || '-' }}</a-descriptions-item>
-          <a-descriptions-item label="Review Comment" :span="2">{{ detail.review?.reviewComment || '-' }}</a-descriptions-item>
+          <a-descriptions-item label="审核">{{ detail.review?.id }}</a-descriptions-item>
+          <a-descriptions-item label="状态">{{ detail.review?.status }}</a-descriptions-item>
+          <a-descriptions-item label="草稿">{{ detail.review?.draftId }}</a-descriptions-item>
+          <a-descriptions-item label="草稿版本">v{{ detail.review?.versionNo }}</a-descriptions-item>
+          <a-descriptions-item label="提交人">{{ detail.review?.submitterUsername || detail.review?.submitterId }}</a-descriptions-item>
+          <a-descriptions-item label="提交时间">{{ detail.review?.submittedTime || '-' }}</a-descriptions-item>
+          <a-descriptions-item label="审核人">{{ detail.review?.reviewerUsername || '-' }}</a-descriptions-item>
+          <a-descriptions-item label="发布版本">v{{ detail.review?.publishedVersionNo || '-' }}</a-descriptions-item>
+          <a-descriptions-item label="提交说明" :span="2">{{ detail.review?.submitComment || '-' }}</a-descriptions-item>
+          <a-descriptions-item label="审核说明" :span="2">{{ detail.review?.reviewComment || '-' }}</a-descriptions-item>
         </a-descriptions>
 
         <a-tabs style="margin-top: 12px">
-          <a-tab-pane key="files" tab="Snapshot">
+          <a-tab-pane key="files" tab="快照">
             <div v-for="(value, path) in detail.files || {}" :key="path" class="review-file">
               <strong>{{ path }}</strong>
               <pre class="review-pre">{{ value }}</pre>
             </div>
           </a-tab-pane>
-          <a-tab-pane key="diff" tab="Published Diff">
-            <a-empty v-if="!detail.publishedDiffs?.length" description="No previous published version diff" />
+          <a-tab-pane key="diff" tab="已发布差异">
+            <a-empty v-if="!detail.publishedDiffs?.length" description="暂无上一已发布版本差异" />
             <div v-for="item in detail.publishedDiffs || []" :key="item.path" class="review-diff">
               <a-tag :color="item.changeType === 'added' ? 'green' : item.changeType === 'deleted' ? 'red' : 'blue'">{{ item.changeType }}</a-tag>
               <strong>{{ item.path }}</strong>
               <div class="review-hash">{{ item.beforeHash || '-' }} -> {{ item.afterHash || '-' }}</div>
             </div>
           </a-tab-pane>
-          <a-tab-pane key="test" tab="Test Report">
+          <a-tab-pane key="test" tab="测试报告">
             <pre class="review-pre">{{ detail.testReport ? JSON.stringify(detail.testReport, null, 2) : '-' }}</pre>
           </a-tab-pane>
-          <a-tab-pane key="ai" tab="AI Records">
+          <a-tab-pane key="ai" tab="AI 记录">
             <pre class="review-pre">{{ detail.aiRecords?.length ? JSON.stringify(detail.aiRecords, null, 2) : '-' }}</pre>
           </a-tab-pane>
         </a-tabs>
@@ -62,20 +62,20 @@
   const detail = ref<any>(null);
 
   const [registerTable, { reload }] = useTable({
-    title: 'Skill Reviews',
+    title: 'Skill 审核',
     api: listSkillReviews,
     rowKey: 'id',
     bordered: true,
     columns: [
-      { title: 'Review ID', dataIndex: 'id', width: 180 },
-      { title: 'Draft ID', dataIndex: 'draftId', width: 180 },
-      { title: 'Version', dataIndex: 'versionNo', width: 90 },
-      { title: 'Status', dataIndex: 'status', width: 120 },
-      { title: 'Submitter', dataIndex: 'submitterUsername', width: 130 },
-      { title: 'Reviewer', dataIndex: 'reviewerUsername', width: 130 },
-      { title: 'Published Version', dataIndex: 'publishedVersionNo', width: 140 },
-      { title: 'Submitted Time', dataIndex: 'submittedTime', width: 170 },
-      { title: 'Submit Comment', dataIndex: 'submitComment', ellipsis: true },
+      { title: '审核 ID', dataIndex: 'id', width: 180 },
+      { title: '草稿 ID', dataIndex: 'draftId', width: 180 },
+      { title: '版本', dataIndex: 'versionNo', width: 90 },
+      { title: '状态', dataIndex: 'status', width: 120 },
+      { title: '提交人', dataIndex: 'submitterUsername', width: 130 },
+      { title: '审核人', dataIndex: 'reviewerUsername', width: 130 },
+      { title: '发布版本', dataIndex: 'publishedVersionNo', width: 140 },
+      { title: '提交时间', dataIndex: 'submittedTime', width: 170 },
+      { title: '提交说明', dataIndex: 'submitComment', ellipsis: true },
     ],
     formConfig: { labelWidth: 90, schemas: keywordSearch() },
     actionColumn: { width: 210, fixed: 'right', slots: { customRender: 'action' } },
@@ -84,9 +84,9 @@
   function actions(record) {
     const actionable = record.status === 'SUBMITTED';
     return [
-      { label: 'Detail', auth: 'openclaw:skill:review', onClick: () => openDetail(record) },
-      { label: 'Approve', auth: 'openclaw:skill:review', ifShow: actionable, onClick: () => approve(record) },
-      { label: 'Reject', auth: 'openclaw:skill:review', ifShow: actionable, onClick: () => reject(record) },
+      { label: '详情', auth: 'openclaw:skill:review', onClick: () => openDetail(record) },
+      { label: '通过', auth: 'openclaw:skill:review', ifShow: actionable, onClick: () => approve(record) },
+      { label: '驳回', auth: 'openclaw:skill:review', ifShow: actionable, onClick: () => reject(record) },
     ];
   }
 
@@ -98,18 +98,18 @@
   function approve(record) {
     let comment = '';
     Modal.confirm({
-      title: 'Approve and publish this fixed version?',
+      title: '通过并发布这个固定版本？',
       content: h(Input.TextArea, {
         rows: 3,
-        placeholder: 'Review comment',
+        placeholder: '审核说明',
         onChange: (event: Event) => {
           comment = (event.target as HTMLTextAreaElement).value;
         },
       }),
-      okText: 'Approve',
+      okText: '通过',
       onOk: async () => {
         const result = await approveSkillReview(record.id, { comment });
-        createMessage.success(`Published version ${result.publishedVersionNo}`);
+        createMessage.success(`已发布版本 ${result.publishedVersionNo}`);
         reload();
         if (detailVisible.value) {
           await openDetail(result);
@@ -121,18 +121,18 @@
   function reject(record) {
     let comment = '';
     Modal.confirm({
-      title: 'Reject this review?',
+      title: '驳回这条审核？',
       content: h(Input.TextArea, {
         rows: 3,
-        placeholder: 'Reject reason',
+        placeholder: '驳回原因',
         onChange: (event: Event) => {
           comment = (event.target as HTMLTextAreaElement).value;
         },
       }),
-      okText: 'Reject',
+      okText: '驳回',
       onOk: async () => {
         await rejectSkillReview(record.id, { comment });
-        createMessage.warning('Review rejected');
+        createMessage.warning('已驳回审核');
         reload();
       },
     });

@@ -4,11 +4,16 @@
       <template #tableTitle>
         <a-space>
           <a-button type="primary" preIcon="ant-design:plus-outlined" v-auth="'openclaw:skill:draft:add'" @click="openAdd">新建草稿</a-button>
-          <a-button preIcon="ant-design:robot-outlined" v-auth="'openclaw:skill:draft:add'" @click="openGenerate">AI Generate</a-button>
+          <a-button preIcon="ant-design:robot-outlined" v-auth="'openclaw:skill:draft:add'" @click="openGenerate">AI 生成</a-button>
           <a-button preIcon="ant-design:copy-outlined" v-auth="'openclaw:skill:draft:add'" @click="openFromSkill">从 Skill 创建</a-button>
         </a-space>
       </template>
       <template #bodyCell="{ column, record }">
+        <template v-if="column.dataIndex === 'draftName'">
+          <a-button type="link" size="small" v-auth="'openclaw:skill:draft:edit'" @click="openEditor(record)">
+            {{ record.draftName }}
+          </a-button>
+        </template>
         <template v-if="column.dataIndex === 'status'">
           <a-tag :color="statusColor(record.status)">{{ record.status }}</a-tag>
         </template>
@@ -31,14 +36,14 @@
       </a-form>
     </a-modal>
 
-    <a-modal v-model:open="generateVisible" title="AI Generate Skill Draft" @ok="submitGenerate" destroyOnClose>
+    <a-modal v-model:open="generateVisible" title="AI 生成 Skill 草稿" @ok="submitGenerate" destroyOnClose>
       <a-form :model="generateForm" layout="vertical">
-        <a-form-item label="Requirement" required>
-          <a-textarea v-model:value="generateForm.requirement" :rows="5" placeholder="Describe what this Skill should help the Agent do." />
+        <a-form-item label="需求描述" required>
+          <a-textarea v-model:value="generateForm.requirement" :rows="5" placeholder="描述这个 Skill 需要帮助 Agent 完成什么任务。" />
         </a-form-item>
-        <a-form-item label="Draft Name"><a-input v-model:value="generateForm.draftName" placeholder="Optional" /></a-form-item>
-        <a-form-item label="Skill Slug"><a-input v-model:value="generateForm.skillSlug" placeholder="Optional, for example excel-summary" /></a-form-item>
-        <a-form-item label="Description"><a-textarea v-model:value="generateForm.description" :rows="3" /></a-form-item>
+        <a-form-item label="草稿名称"><a-input v-model:value="generateForm.draftName" placeholder="可选" /></a-form-item>
+        <a-form-item label="Skill Slug"><a-input v-model:value="generateForm.skillSlug" placeholder="可选，例如 excel-summary" /></a-form-item>
+        <a-form-item label="描述"><a-textarea v-model:value="generateForm.description" :rows="3" /></a-form-item>
       </a-form>
     </a-modal>
 
@@ -92,7 +97,13 @@
       ...commonTimeColumns,
     ],
     formConfig: { labelWidth: 90, schemas: keywordSearch('draftName', '草稿名称') },
-    actionColumn: { width: 320, fixed: 'right' },
+    actionColumn: {
+      title: '操作',
+      dataIndex: 'action',
+      width: 140,
+      fixed: 'right',
+      slots: { customRender: 'action' },
+    },
   });
 
   function statusColor(status) {
@@ -147,12 +158,12 @@
 
   async function submitGenerate() {
     if (!generateForm.requirement) {
-      createMessage.warning('Please describe the Skill requirement');
+      createMessage.warning('请描述 Skill 需求');
       return;
     }
     const draft = await generateSkillDraft(generateForm);
     generateVisible.value = false;
-    createMessage.success('Generated Skill draft');
+    createMessage.success('已生成 Skill 草稿');
     reload();
     openEditor(draft);
   }
@@ -175,7 +186,7 @@
   async function runLint(record) {
     const result = await lintSkillDraft(record.id);
     createMessage[result.passed ? 'success' : 'warning'](
-      `Lint ${result.status}: ${result.errors?.length || 0} errors, ${result.warnings?.length || 0} warnings`
+      `Lint ${result.status}：${result.errors?.length || 0} 个错误，${result.warnings?.length || 0} 个警告`
     );
     reload();
   }
